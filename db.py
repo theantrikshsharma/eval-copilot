@@ -18,13 +18,21 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables. Tests (MANTIS_TEST_MODE, set by tests/__init__.py) never read the developer's .env.
 ENV_PATH = Path(__file__).resolve().parent / ".env"
-load_dotenv(ENV_PATH)
+TEST_MODE = bool(os.getenv("MANTIS_TEST_MODE"))
+if not TEST_MODE:
+    load_dotenv(ENV_PATH)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 # Accept either SUPABASE_SERVICE_KEY or SUPABASE_KEY
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+
+if TEST_MODE and SUPABASE_URL:
+    from urllib.parse import urlparse
+    if urlparse(SUPABASE_URL).hostname not in ("127.0.0.1", "localhost"):
+        # Backstop: a test must never read or write a real Supabase project
+        raise RuntimeError("MANTIS_TEST_MODE is set but SUPABASE_URL is not a local scratch database; refusing to start.")
 
 
 

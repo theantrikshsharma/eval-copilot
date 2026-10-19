@@ -8,3 +8,5 @@ eval_copilot.db
 .DS_Store
 .claude/settings.local.json
 backups/
+.vercel
+.env*

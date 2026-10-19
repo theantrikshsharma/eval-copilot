@@ -18,7 +18,8 @@ import requests
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+if not os.getenv("MANTIS_TEST_MODE"):  # tests never read the developer's .env (see tests/__init__.py)
+    load_dotenv(Path(__file__).resolve().parent / ".env")
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"

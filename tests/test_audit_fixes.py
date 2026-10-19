@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+import tests  # noqa: F401  isolation first: no .env, no real credentials (see tests/__init__.py)
 
 import api
 import db
@@ -265,6 +266,16 @@ class SecurityAndDeployment(unittest.TestCase):
             self.assertEqual(headers["x-frame-options"], "DENY", path)
             self.assertIn("frame-ancestors 'none'", headers["content-security-policy"], path)
             self.assertIn("script-src 'self'", headers["content-security-policy"], path)
+
+    def test_vercel_config_routes_to_main_and_disables_git_deployments(self):
+        import json
+        config = json.loads((PROJECT_ROOT / "vercel.json").read_text())
+        self.assertEqual(config["git"], {"deploymentEnabled": False}, "pushes must never deploy automatically")
+        self.assertEqual(config["builds"][0]["src"], "main.py")
+        self.assertEqual(config["routes"], [{"src": "/(.*)", "dest": "main.py"}])
+        ignored = (PROJECT_ROOT / ".vercelignore").read_text().split()
+        for entry in (".env", "*.db", ".venv/", "tests/", ".vscode/"):
+            self.assertIn(entry, ignored)
 
     def test_schema_enables_row_level_security_on_every_table(self):
         schema = (PROJECT_ROOT / "schema.sql").read_text().lower()
