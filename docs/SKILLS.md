@@ -4,10 +4,10 @@ This guide covers the 83 skills offered by `npx claude-code-templates` (third-pa
 
 The installer writes every skill to `.claude/skills/<name>/SKILL.md` in this repo. Claude Code loads skills from there automatically. Other agents (Codex, Cursor, Copilot, Gemini) read them through the routing table in [`AGENTS.md`](../AGENTS.md).
 
-**Verdicts**
-- **Core**: install now. It's relevant to day-to-day work on this repo.
-- **Situational**: install when the matching task comes up.
-- **Skip**: wrong stack, wrong domain, a duplicate of another skill, or already built into Claude Code.
+**All 83 are installed.** The verdicts below say when agents should *use* each skill:
+- **Core**: use it whenever the task matches. It's relevant to day-to-day work on this repo.
+- **Situational**: use it only for the specific task named.
+- **Skip**: don't use it for this repo, because it's the wrong stack, the wrong domain, a duplicate of another skill, or already built into Claude Code. Use it only if the user explicitly asks for it.
 
 Context for the verdicts: this repo is roughly 2k lines of Python (FastAPI + Gradio + Supabase/SQLite). It calls two external LLM apps over HTTP and scores their responses with deterministic checks. There is no React, Node or TypeScript code.
 
@@ -130,14 +130,14 @@ Context for the verdicts: this repo is roughly 2k lines of Python (FastAPI + Gra
 
 ---
 
-## Install the recommended set
+## Reinstalling
 
-The Core set:
+To reinstall the Core set only:
 
 ```bash
 npx claude-code-templates@latest --skill ai-research/agent-evaluation,development/senior-prompt-engineer,development/api-integration-specialist,development/api-patterns,development/python-pro,development/test-driven-development,development/systematic-debugging,development/postgres-best-practices,security/security-best-practices,development/writing-plans,development/git-commit-helper,development/code-review-checklist,development/clean-code,scientific/statistical-analysis
 ```
 
-To add a Situational skill later, run the same command with just that skill, for example `--skill development/playwright`. Then add a row for it to the routing table in `AGENTS.md`.
+The installer fetches each skill through GitHub's anonymous API, which allows 60 requests per hour. Installing all 83 at once hit that limit, so 52 of the skills were copied from a shallow clone of the same repo at commit `da2b74e` instead. The files are identical to what the installer writes.
 
-**Review after installing.** These skills are third-party instructions that agents will follow. Read the diff under `.claude/skills/` before committing it, the same way you'd review a new dependency.
+**Review after installing.** These skills are third-party instructions that agents will follow. Read the diff under `.claude/skills/` before committing it, the same way you'd review a new dependency. Two bundled scripts have side effects: `artifacts-builder/scripts/init-artifact.sh` runs `npm install -g`, and `scientific-slides/scripts/generate_slide_image_ai.py` sends prompts to OpenRouter.

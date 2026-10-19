@@ -6,3 +6,4 @@ __pycache__/
 .env
 eval_copilot.db
 .DS_Store
+.claude/settings.local.json

@@ -39,9 +39,9 @@ python -m unittest tests/test_mvp.py
 
 Skills are task-specific instruction files in `.claude/skills/<name>/SKILL.md`. Claude Code loads them automatically. **Other agents: when your task matches a row below, read that `SKILL.md` before starting and follow it.** Repo invariants above take precedence over any skill.
 
-If `.claude/skills/` is missing, install the set with the command in [docs/SKILLS.md](docs/SKILLS.md#install-the-recommended-set). That file also explains every skill, including the ones deliberately left out.
+All 83 skills from `claude-code-templates` are installed, but only some of them fit this repo. [docs/SKILLS.md](docs/SKILLS.md) explains each one and why it's in the tier it's in.
 
-### Installed (Core)
+### Core: use whenever the task matches
 
 | When you are… | Read |
 |---|---|
@@ -59,12 +59,38 @@ If `.claude/skills/` is missing, install the set with the command in [docs/SKILL
 | Reviewing a diff or PR | `code-review-checklist` |
 | Writing a commit message | `git-commit-helper` |
 
-### Situational (install first, then add a row above)
+### Situational: use only for these specific tasks
 
-`rag-engineer` (deeper Target B checks), `playwright` (Gradio E2E tests), `docker-expert` (containerising), `database-architect` and `sql-pro` (schema growth), `mcp-builder` (exposing evals as an MCP server), `agent-development` (repo subagents), `scientific-critical-thinking` (auditing the golden set), `web-design-guidelines` (UI accessibility pass).
+| When you are… | Read |
+|---|---|
+| Writing deeper checks for Target B (citations, grounding) | `rag-engineer` |
+| Auditing whether the golden set measures what it claims | `scientific-critical-thinking` |
+| Adding end-to-end tests for the Gradio UI | `playwright` |
+| Containerising or deploying | `docker-expert` |
+| Growing the schema (new tables or columns) | `database-architect`, `sql-pro` |
+| Exposing Eval Co-pilot as an MCP server | `mcp-builder` |
+| Adding repo-specific subagents | `agent-development` |
+| Writing a project skill | `skill-creator` |
+| Doing an accessibility pass on `ui.py` | `web-design-guidelines` |
+| Exporting run history to spreadsheets | `excel-analysis` |
+| Planning post-MVP features | `game-changing-features` |
 
-### Adding a skill
+### Everything else: do not use for this repo
 
-1. Run `npx claude-code-templates@latest --skill <category>/<name>`.
+The other 57 skills are installed but target another stack (React, Node, TypeScript), another domain (marketing, scientific writing, compliance), or overlap a Core skill. **Do not apply them to work on this repo** unless the user explicitly asks for that skill or the task is clearly in that domain, such as "draft an email" or "make a slide deck". When a Core skill and one of these overlap, use the Core skill.
+
+Some of these skills describe themselves so broadly that they will try to trigger on almost any task. Ignore them unless asked:
+- `brainstorming` ("MUST use before any creative work")
+- `software-architecture` ("any case that relates to software development")
+- `typescript-expert` and `docker-expert` ("use PROACTIVELY")
+- `senior-qa`, `senior-fullstack`, `senior-backend`, `backend-dev-guidelines` (written for Node and Express)
+
+Some bundled scripts have side effects. Don't run them without the user's OK:
+- `artifacts-builder/scripts/init-artifact.sh` runs `npm install -g`.
+- `scientific-slides/scripts/generate_slide_image_ai.py` sends prompts to OpenRouter.
+
+### Adding or updating a skill
+
+1. Run `npx claude-code-templates@latest --skill <category>/<name>`. The installer uses GitHub's anonymous API, so large batches can hit the 60-requests/hour limit. If that happens, retry later.
 2. Review the new files under `.claude/skills/<name>/`. They are third-party instructions.
-3. Add a row to the table above, and update its verdict in `docs/SKILLS.md`.
+3. Put the skill in a tier above, and record its verdict in `docs/SKILLS.md`.
