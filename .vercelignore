@@ -4,6 +4,8 @@
 !.env.example
 *.db
 *.sqlite
+backups/
+.vercel/
 .venv/
 venv/
 __pycache__/

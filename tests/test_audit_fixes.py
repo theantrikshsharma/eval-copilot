@@ -274,7 +274,7 @@ class SecurityAndDeployment(unittest.TestCase):
         self.assertEqual(config["builds"][0]["src"], "main.py")
         self.assertEqual(config["routes"], [{"src": "/(.*)", "dest": "main.py"}])
         ignored = (PROJECT_ROOT / ".vercelignore").read_text().split()
-        for entry in (".env", "*.db", ".venv/", "tests/", ".vscode/"):
+        for entry in (".env", ".env.*", "*.db", ".venv/", "tests/", ".vscode/", "backups/", ".vercel/"):
             self.assertIn(entry, ignored)
 
     def test_schema_enables_row_level_security_on_every_table(self):
