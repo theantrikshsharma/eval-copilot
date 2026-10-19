@@ -1,6 +1,10 @@
-# Eval Co-pilot — Checkpoint 4 MVP
+# MANTIS — Checkpoint 4 MVP
 
-Eval Co-pilot catches the cases a friend's AI feature gets wrong, before they ship it. It tests real inputs against live target applications, evaluates each response against golden expectations, persists complete execution history, and provides side-by-side run comparisons.
+**Machine-Assisted Network Testing & Intelligent Scrutiny.** Hunt failures. Prove reliability.
+
+*Every verdict requires evidence.* (Formerly Eval Co-pilot.)
+
+MANTIS catches the cases a friend's AI feature gets wrong, before they ship it. It tests real inputs against live target applications, evaluates each response against golden expectations, persists complete execution history, and provides side-by-side run comparisons.
 
 ## 1. Architecture
 
@@ -69,7 +73,7 @@ To use Supabase:
 2. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`.
 3. Run `schema.sql` in the Supabase SQL Editor.
 
-*Note: If `.env` is omitted, Eval Co-pilot runs using the persistent local SQLite database `eval_copilot.db` with identical schema and functionality.*
+*Note: If `.env` is omitted, MANTIS runs using the persistent local SQLite database `eval_copilot.db` with identical schema and functionality. The file keeps its original name so existing run history carries over.*
 
 ### Step 3: Run Application
 ```bash

@@ -1,5 +1,5 @@
 """
-Gradio Frontend for Eval Co-pilot.
+Gradio Frontend for MANTIS (legacy view at /classic).
 Provides a clear 4-section interface:
 1. Test Cases (View, Filter, Create Golden Pairs)
 2. Run Evaluation / Failure Inspector (Execute, Rerun, Inspect Failures & Evidence)
@@ -243,8 +243,8 @@ def load_summary():
 
 
 def create_gradio_app():
-    with gr.Blocks(title="Eval Co-pilot — Checkpoint 4 MVP") as demo:
-        gr.Markdown("# 🚀 Eval Co-pilot — Checkpoint 4 MVP")
+    with gr.Blocks(title="MANTIS (classic view)") as demo:
+        gr.Markdown("# MANTIS — classic view")
         gr.Markdown(
             "Evaluation co-pilot for testing live AI applications against golden test cases, "
             "persisting runs, inspecting failures, and comparing reruns without overwriting history."

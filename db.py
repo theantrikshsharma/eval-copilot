@@ -1,5 +1,5 @@
 """
-Database Access Layer for Eval Co-pilot (Checkpoint 4).
+Database Access Layer for MANTIS (Checkpoint 4).
 Supports:
 1. Supabase via official Supabase Python SDK (`supabase>=2.33`) when credentials are provided.
 2. Local persistent SQLite database (`eval_copilot.db`) with identical schema when Supabase credentials are not set.

@@ -1,5 +1,5 @@
 """
-Evaluation Engine for Eval Co-pilot.
+Evaluation Engine for MANTIS.
 Implements deterministic checks first, separates ERROR from FAIL from PASS from NEEDS REVIEW,
 and compiles actionable evidence and concise failure explanations.
 """

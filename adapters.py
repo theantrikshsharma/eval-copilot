@@ -1,5 +1,5 @@
 """
-Target Application Adapters for Eval Co-pilot.
+Target Application Adapters for MANTIS.
 Provides isolated, robust HTTP adapters for:
 - Target A: Anupma's Travel Itinerary Generator (Gradio API on Vercel)
 - Target B: Prateek's Knowledge Retrieval System (FastAPI on Vercel)

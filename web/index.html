@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#e6eaee" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#10161c" media="(prefers-color-scheme: dark)">
-  <title>Eval Co-pilot</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2317212B'/%3E%3Cpath d='M9 8H7v16h2M23 8h2v16h-2' stroke='%23fff' stroke-width='2.4' fill='none'/%3E%3Cpath d='m11.5 16.5 3 3 6-7' stroke='%235FD39A' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b0d0c">
+  <meta name="description" content="MANTIS: Machine-Assisted Network Testing & Intelligent Scrutiny. Hunt failures. Prove reliability. Every verdict requires evidence.">
+  <title>MANTIS</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='%230b0d0c'/%3E%3Cpath d='M20.5 14 16 6M27.5 14 32 6' stroke='%23e8ede9' stroke-width='2.6'/%3E%3Cpath d='M11 14h26L24 41z' fill='%23e8ede9'/%3E%3Cpath d='M6 11.5 18 14l-5.5 10zM42 11.5 30 14l5.5 10z' fill='%23c5f82a'/%3E%3Cpath d='M24 33v9' stroke='%230b0d0c' stroke-width='2.6'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&family=Spline+Sans+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="/assets/styles.css">
   <script type="module" src="/assets/app.js"></script>
 </head>
@@ -19,15 +19,18 @@
 
   <div class="shell">
     <aside class="rail" id="rail" aria-label="Test cases">
-      <div class="brand">
-        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M9 8H7v16h2M23 8h2v16h-2" />
-          <path class="brand-tick" d="m11.5 16.5 3 3 6-7" />
+      <div class="brand" title="Machine-Assisted Network Testing &amp; Intelligent Scrutiny">
+        <svg class="brand-mark" viewBox="0 0 48 48" role="img" aria-label="MANTIS">
+          <path class="mk-antenna" d="M20.5 12.5 15 2.5M27.5 12.5 33 2.5" />
+          <path class="mk-head" d="M9 12h30L24 43z" />
+          <path class="mk-eye" d="M3 9.5 17 12l-6.5 11.5zM45 9.5 31 12l6.5 11.5z" />
+          <path class="mk-jaw" d="M24 33.5V44" />
         </svg>
-        <span class="brand-name" translate="no">Eval Co-pilot</span>
+        <span class="brand-name" translate="no" aria-hidden="true">MANTIS</span>
         <button class="icon-btn rail-close" id="rail-close" type="button" aria-label="Close case list">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>
         </button>
+        <p class="brand-tagline">Hunt failures. Prove reliability.</p>
       </div>
 
       <div class="rail-tools">
@@ -59,7 +62,13 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" /></svg>
           Cases
         </button>
-        <span class="brand-name" translate="no">Eval Co-pilot</span>
+        <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+          <path class="mk-antenna" d="M20.5 12.5 15 2.5M27.5 12.5 33 2.5" />
+          <path class="mk-head" d="M9 12h30L24 43z" />
+          <path class="mk-eye" d="M3 9.5 17 12l-6.5 11.5zM45 9.5 31 12l6.5 11.5z" />
+          <path class="mk-jaw" d="M24 33.5V44" />
+        </svg>
+        <span class="brand-name" translate="no">MANTIS</span>
       </div>
       <div id="view" class="view" aria-busy="true">
         <div class="skeleton" aria-hidden="true"><span></span><span></span><span></span></div>

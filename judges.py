@@ -1,5 +1,5 @@
 """
-Model-backed checks for Eval Co-pilot.
+Model-backed checks for MANTIS.
 - LLM judge: openai/gpt-oss-120b on Groq. Resolves checks the deterministic rules left as NEEDS REVIEW.
 - Content safety: nvidia/nemotron-3.5-content-safety on OpenRouter. Labels the target's response safe or unsafe.
 

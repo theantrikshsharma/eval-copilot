@@ -1,5 +1,5 @@
 """
-FastAPI Backend for Eval Co-pilot.
+FastAPI Backend for MANTIS.
 Provides clean REST API endpoints for:
 - Managing Golden Pairs
 - Executing Evaluations against Target Apps
@@ -19,8 +19,11 @@ from evaluator import evaluate_response
 
 
 app = FastAPI(
-    title="Eval Co-pilot API",
-    description="Evaluation co-pilot for checking live AI applications against golden test cases.",
+    title="MANTIS API",
+    description=(
+        "MANTIS (Machine-Assisted Network Testing & Intelligent Scrutiny) runs golden test cases against live "
+        "AI applications and scores every response with evidence. Hunt failures. Prove reliability."
+    ),
     version="1.0.0"
 )
 

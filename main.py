@@ -1,5 +1,5 @@
 """
-Eval Co-pilot Main Application Entrypoint.
+MANTIS Main Application Entrypoint.
 Serves from a single server:
 - /          the web UI (web/index.html, plain HTML/CSS/JS calling the REST API)
 - /api/...   the REST API
@@ -36,5 +36,5 @@ def web_asset(name: str):
 app = gr.mount_gradio_app(fastapi_app, create_gradio_app(), path="/classic")
 
 if __name__ == "__main__":
-    print("Starting Eval Co-pilot on http://127.0.0.1:8000...")
+    print("Starting MANTIS on http://127.0.0.1:8000...")
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

@@ -1,4 +1,4 @@
-// Pure helpers for the Eval Co-pilot front end. No DOM access, so they run under `node --test`.
+// Pure helpers for the MANTIS front end. No DOM access, so they run under `node --test`.
 
 export const STATUSES = ["PASS", "FAIL", "ERROR", "NEEDS REVIEW"];
 

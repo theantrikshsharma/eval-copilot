@@ -1,5 +1,5 @@
 """
-End-to-End Acceptance Test for Eval Co-pilot (Checkpoint 4 MVP).
+End-to-End Acceptance Test for MANTIS (Checkpoint 4 MVP).
 Verifies the complete 9-step workflow specified in Section 3 and Section 11:
 1. Create or load a golden test case.
 2. Execute it against a target application.

@@ -82,7 +82,7 @@ async function api(path, options = {}) {
       ...options,
     });
   } catch {
-    throw new ApiError("Can't reach the Eval Co-pilot server. Check that it's running, then try again.");
+    throw new ApiError("Can't reach the MANTIS server. Check that it's running, then try again.");
   }
   if (!resp.ok) {
     let detail = `The server returned HTTP ${resp.status}.`;
@@ -372,6 +372,7 @@ async function runTest() {
   state.running = true;
   const started = performance.now();
   updateRunButton(0);
+  $("result")?.classList.add("is-running");
   runTimer = setInterval(() => updateRunButton(Math.round((performance.now() - started) / 1000)), 1000);
 
   try {
@@ -522,7 +523,7 @@ function renderResult(runs) {
   if (state.resultId == null) {
     result.className = "result result-empty";
     result.replaceChildren(
-      h("p", { class: "empty-line" }, "This case hasn't been run yet. Run it to see how the app responds and which checks pass."),
+      h("p", { class: "empty-line" }, "No verdict yet. Every verdict requires evidence, so run this case to collect some."),
     );
     return;
   }

@@ -1,6 +1,6 @@
 # Agent Skills Guide
 
-This guide covers the 83 skills offered by `npx claude-code-templates` (third-party, from [davila7/claude-code-templates](https://github.com/davila7/claude-code-templates)). For each skill it says what the skill does and whether it helps Eval Co-pilot. The descriptions are summarised from each skill's own `SKILL.md` as of 2026-10-19.
+This guide covers the 83 skills offered by `npx claude-code-templates` (third-party, from [davila7/claude-code-templates](https://github.com/davila7/claude-code-templates)). For each skill it says what the skill does and whether it helps MANTIS. The descriptions are summarised from each skill's own `SKILL.md` as of 2026-10-19.
 
 The installer writes every skill to `.claude/skills/<name>/SKILL.md` in this repo. Claude Code loads skills from there automatically. Other agents (Codex, Cursor, Copilot, Gemini) read them through the routing table in [`AGENTS.md`](../AGENTS.md).
 
@@ -42,7 +42,7 @@ Context for the verdicts: this repo is roughly 2k lines of Python (FastAPI + Gra
 | `docker-expert` | Dockerfiles, multi-stage builds, Compose, hardening. Marked "use PROACTIVELY", so it triggers often. | When you containerise for deployment. |
 | `database-architect` | Schema modelling and technology selection. | When the 3-table schema needs to grow, for example to add runs metadata, tags or judge scores. |
 | `sql-pro` | Advanced SQL and OLTP/OLAP queries. | When summary and comparison queries move from Python into SQL. |
-| `mcp-builder` | Building MCP servers with Python FastMCP or the TypeScript SDK. | If you expose Eval Co-pilot as an MCP server, so coding agents can run evals on their own changes. This is a strong future feature. |
+| `mcp-builder` | Building MCP servers with Python FastMCP or the TypeScript SDK. | If you expose MANTIS as an MCP server, so coding agents can run evals on their own changes. This is a strong future feature. |
 | `agent-development` | Writing Claude Code subagents: frontmatter, triggers, tool lists. | If you add repo-specific subagents, such as an "eval-runner" agent. |
 | `skill-creator` | Creating and evaluating skills. Duplicates Claude Code's built-in skill-creator. | If you write a project skill such as "add-golden-pair". |
 | `web-design-guidelines` | Reviews UI code against web interface guidelines and accessibility. | For an accessibility pass on `ui.py`. Gradio limits how much you can change. |

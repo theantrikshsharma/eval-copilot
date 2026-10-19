@@ -1,5 +1,5 @@
 -- ==================================================
--- EVAL CO-PILOT: CHECKPOINT 4 SUPABASE DATABASE SCHEMA
+-- MANTIS: CHECKPOINT 4 SUPABASE DATABASE SCHEMA
 -- ==================================================
 
 -- 1. Table: GOLDEN_PAIRS

@@ -49,6 +49,17 @@ class TestWebRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["status"], "healthy")
 
+    def test_ui_is_branded_mantis(self):
+        page = self.client.get("/").text
+        self.assertIn("<title>MANTIS</title>", page)
+        self.assertIn('aria-label="MANTIS"', page)
+        for path in ("/", "/assets/app.js", "/assets/lib.js", "/assets/styles.css"):
+            self.assertNotIn("Eval Co-pilot", self.client.get(path).text, path)
+
+    def test_api_and_classic_ui_carry_the_new_name(self):
+        self.assertEqual(self.client.get("/openapi.json").json()["info"]["title"], "MANTIS API")
+        self.assertIn("MANTIS", self.client.get("/classic/").text)
+
     def test_ui_never_contains_secrets(self):
         page = self.client.get("/").text + self.client.get("/assets/app.js").text
         for marker in ("gsk_", "sk-or-", "SUPABASE_SERVICE_KEY", "GROQ_API_KEY"):

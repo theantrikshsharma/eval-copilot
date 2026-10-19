@@ -4,7 +4,7 @@ Instructions for any coding agent (Claude Code, Codex, Cursor, Copilot, Gemini, 
 
 ## Project
 
-Eval Co-pilot runs golden test inputs against live third-party LLM apps, scores each response with deterministic checks, stores every run, and compares runs side by side. See [README.md](README.md) for architecture, targets and schema.
+MANTIS (Machine-Assisted Network Testing & Intelligent Scrutiny, formerly Eval Co-pilot) runs golden test inputs against live third-party LLM apps, scores each response with deterministic checks, stores every run, and compares runs side by side. See [README.md](README.md) for architecture, targets and schema.
 
 | File | Responsibility |
 |---|---|
@@ -71,7 +71,7 @@ All 83 skills from `claude-code-templates` are installed, but only some of them 
 | Adding end-to-end tests for the Gradio UI | `playwright` |
 | Containerising or deploying | `docker-expert` |
 | Growing the schema (new tables or columns) | `database-architect`, `sql-pro` |
-| Exposing Eval Co-pilot as an MCP server | `mcp-builder` |
+| Exposing MANTIS as an MCP server | `mcp-builder` |
 | Adding repo-specific subagents | `agent-development` |
 | Writing a project skill | `skill-creator` |
 | Doing an accessibility pass on `ui.py` | `web-design-guidelines` |
