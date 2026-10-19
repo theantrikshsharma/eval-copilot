@@ -13,7 +13,7 @@ Eval Co-pilot runs golden test inputs against live third-party LLM apps, scores 
 | `web/` | The web UI: plain HTML/CSS/JS with no build step, calling `/api/*`. `lib.js` holds the pure logic and is tested by `lib.test.mjs`. Render target output with text nodes only, never `innerHTML`. |
 | `ui.py` | Legacy Gradio UI, kept at `/classic` as a fallback. |
 | `adapters.py` | One adapter per target app. Every call returns an `AdapterResponse` and never raises. |
-| `evaluator.py` | Checks. Turns `AdapterResponse` into an `EvaluationResult` with per-check evidence. |
+| `evaluator.py` | Checks. Turns `AdapterResponse` into an `EvaluationResult` with per-check evidence. Per-case checks from A-05/P-05 onwards apply only when a pair's input exactly matches its entry in `CASE_INPUTS`, so a reused ID never inherits them. Checks marked `(semantic)` go to the LLM judge. |
 | `judges.py` | Model-backed checks: Groq LLM judge for `NEEDS REVIEW` checks, OpenRouter Nemotron content safety. Never raises. |
 | `db.py` | Supabase when `.env` has credentials, otherwise local SQLite (`eval_copilot.db`). Both must behave identically. |
 | `schema.sql` | Postgres schema for Supabase. Keep it in sync with the SQLite DDL in `db.py`. |
@@ -24,7 +24,7 @@ Eval Co-pilot runs golden test inputs against live third-party LLM apps, scores 
 uv venv && source .venv/bin/activate && uv pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 python -m unittest tests/test_mvp.py
-python -m unittest tests/test_judges.py tests/test_web.py   # offline
+python -m unittest tests/test_case_checks.py tests/test_judges.py tests/test_web.py   # offline
 node --test web/lib.test.mjs                                 # front-end logic
 ```
 
