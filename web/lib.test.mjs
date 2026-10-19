@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   extractQuotes, findHighlights, segment, readableResponse, caseTitle, nextCaseId,
   runsByCase, verdictSentence, relativeTime, absoluteTime, parseViewState, serializeViewState, statusMeta,
+  evaluationNote,
 } from "./lib.js";
 
 test("extracts judge quotes, splitting on ellipses", () => {
@@ -99,6 +100,14 @@ test("view state round-trips through the URL", () => {
   assert.deepEqual(parseViewState("?case=A-01&run=abc&compare=1"), {
     caseId: "A-01", resultId: null, checkIndex: null, compare: null,
   });
+});
+
+test("evaluation note appears only for Prateek's cases", () => {
+  assert.match(evaluationNote("Prateek"), /^\* Evaluation note: Prateek's application uses fictional data\./);
+  assert.match(evaluationNote(" prateek "), /observable\nAPI behaviour|observable API behaviour/);
+  assert.equal(evaluationNote("Anupma"), null);
+  assert.equal(evaluationNote(""), null);
+  assert.equal(evaluationNote(undefined), null);
 });
 
 test("statusMeta falls back for unknown statuses", () => {

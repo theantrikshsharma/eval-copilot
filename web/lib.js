@@ -79,6 +79,16 @@ export function readableResponse(raw) {
   return raw;
 }
 
+const PRATEEK_NOTE =
+  "* Evaluation note: Prateek's application uses fictional data. Retrieval accuracy can only be independently " +
+  "verified when trusted reference information is available. Other checks evaluate observable API behaviour and " +
+  "response constraints.";
+
+/** A context note shown with a case, or null. Only Prateek's cases have one. */
+export function evaluationNote(targetApp) {
+  return (targetApp || "").trim().toLowerCase() === "prateek" ? PRATEEK_NOTE : null;
+}
+
 export function caseTitle(input, max = 64) {
   const text = (input || "").trim().replace(/\s+/g, " ");
   if (!text) return "Empty input";

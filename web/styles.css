@@ -299,6 +299,11 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .spec dt { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin-bottom: 4px; }
 .spec dd { max-width: 68ch; max-height: 12.4em; overflow-y: auto; overscroll-behavior: contain; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-line; }
 
+.eval-note {
+  max-width: 76ch; margin-top: -8px; padding: 0 32px 20px;
+  font-size: var(--t-xs); line-height: 1.55; color: var(--ink-2);
+}
+
 .runbar {
   display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 28px;
   padding: 16px 32px 20px;
@@ -579,7 +584,7 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
   .bench { padding: 0 12px 24px; }
   .mobile-bar { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
   .case { min-height: 0; }
-  .case-head, .spec, .runbar, .verdict, .panes, .compare { padding-left: 18px; padding-right: 18px; }
+  .case-head, .spec, .eval-note, .runbar, .verdict, .panes, .compare { padding-left: 18px; padding-right: 18px; }
   .case-head { padding-top: 20px; }
   .spec { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .verdict-side { justify-items: start; }

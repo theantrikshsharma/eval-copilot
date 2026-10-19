@@ -1,6 +1,7 @@
 import {
   statusMeta, extractQuotes, findHighlights, segment, readableResponse, caseTitle, nextCaseId,
   runsByCase, verdictSentence, relativeTime, absoluteTime, parseTimestamp, parseViewState, serializeViewState,
+  evaluationNote,
 } from "./lib.js";
 
 const MAX_HISTORY_CHIPS = 40;
@@ -463,6 +464,7 @@ function renderView({ loading = false } = {}) {
         inputIsTitle ? null : h("div", {}, h("dt", {}, "Input sent"), h("dd", {}, pair.input || "(empty)")),
         h("div", {}, h("dt", {}, "Expected behaviour"), h("dd", {}, pair.expected_behaviour)),
       ),
+      evaluationNote(pair.target_app) ? h("p", { class: "eval-note" }, evaluationNote(pair.target_app)) : null,
       h("div", { class: "runbar" },
         h("div", { class: "run-controls" },
           h("button", {
