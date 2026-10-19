@@ -267,9 +267,9 @@ class TestPrateekChecks(OfflineTestCase):
 
     def test_retrieval_miss_is_one_failure_not_several(self):
         result = evaluate("P-05", text(NO_ANSWER))
-        self.assertEqual(statuses(result), {
-            "HTTP & Network Reachability": "PASS", "Correct Document Retrieved (Project Elm)": "FAIL",
-        })
+        failures = [name for name, status in statuses(result).items() if status == "FAIL"]
+        self.assertEqual(failures, ["Correct Document Retrieved (Project Elm)"])
+        self.assertNotIn("Sunlight Duration (2.5 hours)", statuses(result))
 
     def test_paraphrased_elm_answer_passes(self):
         resp = answer("Project Elm requires at least 2.5 hours of potential direct sunlight on 21 March.", ELM_SOURCE)

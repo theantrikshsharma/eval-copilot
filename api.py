@@ -9,13 +9,14 @@ Provides clean REST API endpoints for:
 """
 
 import time
+from collections import Counter
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import db
 from adapters import invoke_target
-from evaluator import evaluate_response
+from evaluator import effective_status, evaluate_response, is_unavailable_capability
 
 
 app = FastAPI(
@@ -43,6 +44,42 @@ class ExecuteRequest(BaseModel):
     pair_id: str
     run_id: Optional[str] = None
     timeout: float = 20.0
+
+
+# ----------------------------------------------------
+# Display verdicts
+# Stored history is never rewritten. Each run also gets a display `verdict`: the same precedence over the
+# checks that actually ran. It differs from the stored `overall_status` only for older runs whose sole open
+# item was an optional check that couldn't run (e.g. Content Safety during a provider quota outage).
+# ----------------------------------------------------
+
+STATUS_LABELS = {"PASS": "Pass", "FAIL": "Fail", "ERROR": "Error", "NEEDS REVIEW": "Needs review"}
+
+
+def annotate_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
+    checks = detail.get("checks") or []
+    for c in checks:
+        c["unavailable"] = is_unavailable_capability(c["check_name"], c["status"], c.get("evidence_or_reason") or "")
+    skipped = [c["check_name"] for c in checks if c["unavailable"]]
+    stored = detail["overall_status"]
+    verdict = effective_status(checks) if skipped else stored
+    detail["verdict"] = verdict
+    detail["verdict_note"] = (
+        f"Recorded as {STATUS_LABELS.get(stored, stored)}. {', '.join(skipped)} could not run, "
+        f"so it does not count toward the verdict." if verdict != stored else None
+    )
+    return detail
+
+
+def annotate_results(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Only stored NEEDS REVIEW runs can be reinterpreted, so only those need their checks loaded."""
+    for row in rows:
+        if row["overall_status"] == "NEEDS REVIEW":
+            detail = annotate_detail(db.get_run_result_detail(row["result_id"]))
+            row["verdict"], row["verdict_note"] = detail["verdict"], detail["verdict_note"]
+        else:
+            row["verdict"], row["verdict_note"] = row["overall_status"], None
+    return rows
 
 
 # ----------------------------------------------------
@@ -128,7 +165,7 @@ def execute_test(req: ExecuteRequest):
     )
 
     # 4. Return Full Result
-    full_detail = db.get_run_result_detail(result_id)
+    full_detail = annotate_detail(db.get_run_result_detail(result_id))
     full_detail["why_failed"] = eval_result.why_failed
     return full_detail
 
@@ -140,7 +177,7 @@ def list_runs():
 
 @app.get("/api/results")
 def list_results(pair_id: Optional[str] = None, run_id: Optional[str] = None):
-    return db.get_run_results(pair_id=pair_id, run_id=run_id)
+    return annotate_results(db.get_run_results(pair_id=pair_id, run_id=run_id))
 
 
 @app.get("/api/results/{result_id}")
@@ -148,7 +185,7 @@ def get_result(result_id: int):
     detail = db.get_run_result_detail(result_id)
     if not detail:
         raise HTTPException(status_code=404, detail=f"Result ID {result_id} not found.")
-    return detail
+    return annotate_detail(detail)
 
 
 @app.get("/api/compare")
@@ -169,6 +206,7 @@ def compare_executions(result_id_a: int = Query(...), result_id_b: int = Query(.
         raise HTTPException(status_code=404, detail=f"Execution result_id_a={result_id_a} not found.")
     if not run_b:
         raise HTTPException(status_code=404, detail=f"Execution result_id_b={result_id_b} not found.")
+    run_a, run_b = annotate_detail(run_a), annotate_detail(run_b)
 
     checks_a = {c["check_name"]: c for c in run_a.get("checks", [])}
     checks_b = {c["check_name"]: c for c in run_b.get("checks", [])}
@@ -195,7 +233,9 @@ def compare_executions(result_id_a: int = Query(...), result_id_b: int = Query(.
             "status_a": status_a,
             "status_b": status_b,
             "evidence_a": reason_a,
-            "evidence_b": reason_b
+            "evidence_b": reason_b,
+            "unavailable_a": bool(ca and ca["unavailable"]),
+            "unavailable_b": bool(cb and cb["unavailable"]),
         }
         check_comparisons.append(comp_item)
 
@@ -214,6 +254,7 @@ def compare_executions(result_id_a: int = Query(...), result_id_b: int = Query(.
             "pair_id": run_a["pair_id"],
             "timestamp": run_a["timestamp"],
             "overall_status": run_a["overall_status"],
+            "verdict": run_a["verdict"],
             "actual_response": run_a["actual_response"]
         },
         "execution_b": {
@@ -222,6 +263,7 @@ def compare_executions(result_id_a: int = Query(...), result_id_b: int = Query(.
             "pair_id": run_b["pair_id"],
             "timestamp": run_b["timestamp"],
             "overall_status": run_b["overall_status"],
+            "verdict": run_b["verdict"],
             "actual_response": run_b["actual_response"]
         },
         "summary": {
@@ -238,4 +280,15 @@ def compare_executions(result_id_a: int = Query(...), result_id_b: int = Query(.
 
 @app.get("/api/summary")
 def get_summary():
-    return db.get_summary_stats()
+    """Run counts per display verdict. Stored statuses and the failing-check ranking are unchanged."""
+    stats = db.get_summary_stats()
+    rows = annotate_results(db.get_run_results())
+    verdicts = Counter(r["verdict"] for r in rows)
+    stats.update(
+        pass_count=verdicts["PASS"],
+        fail_count=verdicts["FAIL"],
+        error_count=verdicts["ERROR"],
+        needs_review_count=verdicts["NEEDS REVIEW"],
+        reclassified_runs=sum(1 for r in rows if r["verdict_note"]),
+    )
+    return stats

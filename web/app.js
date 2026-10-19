@@ -1,7 +1,7 @@
 import {
   statusMeta, extractQuotes, findHighlights, segment, readableResponse, caseTitle, nextCaseId,
   runsByCase, verdictSentence, relativeTime, absoluteTime, parseTimestamp, parseViewState, serializeViewState,
-  evaluationNote,
+  evaluationNote, checkDisplayStatus, runVerdict, filterCases,
 } from "./lib.js";
 
 const MAX_HISTORY_CHIPS = 40;
@@ -20,6 +20,7 @@ const ICONS = {
   error: '<path d="M8 4.6v4.2" /><path d="M8 11.3v.1" />',
   review: '<path d="M6.3 6.3a1.8 1.8 0 1 1 2.5 1.7c-.5.2-.8.6-.8 1.1v.3" /><path d="M8 11.3v.1" />',
   unknown: '<circle cx="8" cy="8" r="1" />',
+  unevaluated: '<path d="M5 8h6" />',
   play: '<path d="M5.5 3.8v8.4L12 8z" />',
   compare: '<path d="M5 3 2.5 5.5 5 8M2.5 5.5h8M11 8l2.5 2.5L11 13M13.5 10.5h-8" />',
   copy: '<rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5" /><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" />',
@@ -113,6 +114,7 @@ const state = {
   summary: null,
   backend: "",
   filter: "All",
+  statusFilter: null,
   query: "",
   caseId: null,
   resultId: null,
@@ -143,7 +145,7 @@ function targetDescription(target) {
 }
 
 function defaultCheckIndex(detail) {
-  const index = detail.checks.findIndex((c) => c.status !== "PASS");
+  const index = detail.checks.findIndex((c) => c.status !== "PASS" && !c.unavailable);
   return index === -1 ? null : index;
 }
 
@@ -197,19 +199,27 @@ $("target-filter").addEventListener("keydown", (e) => {
 });
 
 function visiblePairs() {
-  const query = state.query.trim().toLowerCase();
-  return state.pairs.filter((p) => {
-    if (state.filter !== "All" && p.target_app.toLowerCase() !== state.filter.toLowerCase()) return false;
-    if (!query) return true;
-    return [p.pair_id, p.target_app, p.input, p.expected_behaviour].some((v) => (v || "").toLowerCase().includes(query));
-  });
+  return filterCases(state.pairs, state.results, { target: state.filter, query: state.query, status: state.statusFilter });
+}
+
+function emptyListMessage() {
+  if (!state.pairs.length) return "No test cases yet.";
+  if (!state.statusFilter) return "No cases match. Clear the search or pick another app.";
+  const app = state.filter === "All" ? "" : `${state.filter} `;
+  return `No ${app}cases whose latest run is ${statusMeta(state.statusFilter).label}.`;
 }
 
 function renderCaseList() {
   const list = $("case-list");
   const pairs = visiblePairs();
+  renderStatusBanner(pairs.length);
   if (!pairs.length) {
-    list.replaceChildren(h("li", { class: "case-empty" }, state.pairs.length ? "No cases match. Clear the search or pick another app." : "No test cases yet."));
+    list.replaceChildren(h("li", { class: "case-empty" },
+      h("span", {}, emptyListMessage()),
+      state.statusFilter
+        ? h("button", { class: "btn btn-quiet btn-sm", type: "button", on: { click: () => setStatusFilter(null) } }, "Clear status filter")
+        : null,
+    ));
     return;
   }
   const grouped = runsByCase(state.results);
@@ -218,7 +228,7 @@ function renderCaseList() {
       const runs = grouped.get(p.pair_id) || [];
       const latest = runs[0];
       const trace = runs.slice(0, 6).reverse();
-      const statusText = latest ? `Latest: ${statusMeta(latest.overall_status).label}` : "Not run yet";
+      const statusText = latest ? `Latest: ${statusMeta(runVerdict(latest)).label}` : "Not run yet";
       return h("li", {},
         h("a", {
           class: "case-item",
@@ -237,16 +247,43 @@ function renderCaseList() {
           h("span", { class: "case-item-top" },
             h("span", { class: "case-item-id", translate: "no" }, p.pair_id),
             h("span", { class: "case-item-target" }, p.target_app),
-            latest ? glyph(latest.overall_status, "glyph-sm") : h("span", { class: "glyph glyph-none glyph-sm" }),
+            latest ? glyph(runVerdict(latest), "glyph-sm") : h("span", { class: "glyph glyph-none glyph-sm" }),
           ),
           h("span", { class: "case-item-title" }, keepDatesTogether(caseTitle(p.input))),
           trace.length > 1
             ? h("span", { class: "trace", "aria-hidden": "true" },
-              trace.map((r) => h("span", { class: `trace-tick tick-${statusMeta(r.overall_status).key}` })))
+              trace.map((r) => h("span", { class: `trace-tick tick-${statusMeta(runVerdict(r)).key}` })))
             : null,
         ),
       );
     }),
+  );
+}
+
+function setStatusFilter(status) {
+  state.statusFilter = state.statusFilter === status ? null : status;
+  renderTally();
+  renderCaseList();
+  const pressed = document.querySelector(`.tally-btn[data-status="${status}"]`);
+  (pressed || $("case-search")).focus();
+}
+
+function renderStatusBanner(matches) {
+  const banner = $("status-filter-banner");
+  if (!state.statusFilter) {
+    banner.hidden = true;
+    banner.replaceChildren();
+    return;
+  }
+  const label = statusMeta(state.statusFilter).label;
+  banner.hidden = false;
+  banner.replaceChildren(
+    glyph(state.statusFilter, "glyph-sm"),
+    h("span", {}, `${matches} ${matches === 1 ? "case" : "cases"} whose latest run is ${label}`),
+    h("button", {
+      class: "icon-btn", type: "button", "aria-label": `Clear the ${label} filter`, title: "Clear filter",
+      on: { click: () => setStatusFilter(null) },
+    }, icon("close")),
   );
 }
 
@@ -259,11 +296,27 @@ function renderTally() {
   const top = s.top_failing_checks || [];
   $("tally").replaceChildren(
     h("p", { class: "tally-total" }, h("strong", {}, String(s.total_executions)), s.total_executions === 1 ? " run saved" : " runs saved"),
-    h("ul", { class: "tally-list" },
-      rows.map(([status, count]) =>
-        h("li", { class: count ? "" : "is-zero" }, glyph(status, "glyph-sm"), h("span", {}, statusMeta(status).label), h("strong", {}, String(count))),
-      ),
+    h("ul", { class: "tally-list", "aria-label": "Filter cases by the status of their latest run" },
+      rows.map(([status, count]) => {
+        const label = statusMeta(status).label;
+        const active = state.statusFilter === status;
+        return h("li", {},
+          h("button", {
+            type: "button",
+            class: `tally-btn${count ? "" : " is-zero"}`,
+            "data-status": status,
+            "aria-pressed": String(active),
+            "aria-label": `${label}: ${count} ${count === 1 ? "run" : "runs"}. ${active ? "Clear this filter" : `Show cases whose latest run is ${label}`}`,
+            title: active ? "Clear this filter" : `Show cases whose latest run is ${label}`,
+            on: { click: () => setStatusFilter(status) },
+          }, glyph(status, "glyph-sm"), h("span", {}, label), h("strong", {}, String(count))),
+        );
+      }),
     ),
+    s.reclassified_runs
+      ? h("p", { class: "tally-note" },
+        `${s.reclassified_runs} older ${s.reclassified_runs === 1 ? "run was" : "runs were"} recorded as Needs review only because an optional check couldn't run.`)
+      : null,
     top.length
       ? h("details", { class: "tally-top" },
         h("summary", {}, "Checks that fail most"),
@@ -388,8 +441,8 @@ async function runTest() {
     state.compareData = null;
     state.freshResultId = detail.result_id;
     syncUrl();
-    const meta = statusMeta(detail.overall_status);
-    announce(`Run finished. ${meta.label}. ${verdictSentence(detail.overall_status, detail.checks)}`);
+    const verdict = runVerdict(detail);
+    announce(`Run finished. ${statusMeta(verdict).label}. ${verdictSentence(verdict, displayChecks(detail))}`);
   } catch (err) {
     toast(err.message, "error");
   } finally {
@@ -502,7 +555,7 @@ function renderHistory(runs) {
     h("p", { class: "history-label", id: "history-label" }, label),
     h("div", { class: "history-chips", role: "group", "aria-labelledby": "history-label" },
       shown.map((r) => {
-        const meta = statusMeta(r.overall_status);
+        const meta = statusMeta(runVerdict(r));
         const selected = r.result_id === state.resultId || (state.compare || []).includes(r.result_id);
         return h("button", {
           type: "button",
@@ -535,7 +588,8 @@ function renderResult(runs) {
 
   const detail = details.get(state.resultId);
   if (!detail) return;
-  const meta = statusMeta(detail.overall_status);
+  const verdict = runVerdict(detail);
+  const meta = statusMeta(verdict);
   const index = runs.findIndex((r) => r.result_id === detail.result_id);
   const previous = runs[index + 1];
   const fresh = state.freshResultId === detail.result_id;
@@ -544,8 +598,9 @@ function renderResult(runs) {
   result.replaceChildren(
     h("div", { class: "verdict" },
       h("div", { class: "verdict-main" },
-        h("p", { class: `verdict-word tone-${meta.key}` }, glyph(detail.overall_status, "glyph-lg"), h("span", {}, meta.label)),
-        h("p", { class: "verdict-sentence" }, verdictSentence(detail.overall_status, detail.checks)),
+        h("p", { class: `verdict-word tone-${meta.key}` }, glyph(verdict, "glyph-lg"), h("span", {}, meta.label)),
+        h("p", { class: "verdict-sentence" }, verdictSentence(verdict, displayChecks(detail))),
+        detail.verdict_note ? h("p", { class: "verdict-note" }, detail.verdict_note) : null,
       ),
       h("div", { class: "verdict-side" },
         h("p", { class: "verdict-meta" },
@@ -570,6 +625,25 @@ function renderResult(runs) {
   renderResultPanes();
 }
 
+function displayChecks(detail) {
+  return detail.checks.map((c) => ({ ...c, status: checkDisplayStatus(c) }));
+}
+
+/** States which optional evaluation didn't happen in this run, separately from the verdicts. */
+function capabilityNote(detail) {
+  if (!detail.actual_response) return null;
+  const skipped = detail.checks.filter((c) => c.unavailable).map((c) => c.check_name);
+  const safetyEvaluated = detail.checks.some((c) => c.check_name === "Content Safety" && !c.unavailable);
+  const localOnly = detail.checks.some((c) => c.check_name === "Credential Leak (local)") ? " Only the local credential check ran." : "";
+  let text = null;
+  if (skipped.length) {
+    text = `Not evaluated in this run: ${skipped.join(", ")}. Its provider couldn't answer, so it doesn't count toward the verdict.`;
+  } else if (!safetyEvaluated) {
+    text = `Semantic content safety was not evaluated in this run.${localOnly}`;
+  }
+  return text ? h("p", { class: "capability-note" }, glyph("NOT EVALUATED", "glyph-sm"), h("span", {}, text)) : null;
+}
+
 function renderResultPanes() {
   const panes = $("panes");
   const detail = details.get(state.resultId);
@@ -584,7 +658,8 @@ function renderResultPanes() {
       ),
       h("ol", { class: "check-list" },
         detail.checks.map((c, i) => {
-          const meta = statusMeta(c.status);
+          const shown = checkDisplayStatus(c);
+          const meta = statusMeta(shown);
           return h("li", { style: `--i:${i}` },
             h("button", {
               type: "button",
@@ -593,7 +668,7 @@ function renderResultPanes() {
               "aria-pressed": String(i === state.checkIndex),
               on: { click: () => selectCheck(i) },
             },
-              glyph(c.status),
+              glyph(shown),
               h("span", { class: "check-body" },
                 h("span", { class: "check-name" }, c.check_name),
                 h("span", { class: `check-status tone-${meta.key}` }, meta.label),
@@ -603,6 +678,7 @@ function renderResultPanes() {
           );
         }),
       ),
+      capabilityNote(detail),
     ),
     renderResponsePane(detail.actual_response, selected),
   );
@@ -618,7 +694,7 @@ function renderResponsePane(raw, selectedCheck, { title = "Response", compact = 
   const text = readableResponse(raw);
   const quotes = selectedCheck ? extractQuotes(selectedCheck.evidence_or_reason) : [];
   const ranges = quotes.length ? findHighlights(text, quotes) : [];
-  const tone = selectedCheck ? statusMeta(selectedCheck.status).key : "";
+  const tone = selectedCheck ? statusMeta(checkDisplayStatus(selectedCheck)).key : "";
 
   let hint = null;
   if (selectedCheck && text) {
@@ -660,7 +736,7 @@ function renderCompare(runs) {
   const summary = data.summary;
   const runOptions = (selectedId) =>
     runs.map((r) => h("option", { value: String(r.result_id), selected: r.result_id === selectedId },
-      `Run #${r.result_id}, ${statusMeta(r.overall_status).label}, ${relativeTime(r.timestamp)}`));
+      `Run #${r.result_id}, ${statusMeta(runVerdict(r)).label}, ${relativeTime(r.timestamp)}`));
 
   const groups = [
     ["Fixed", summary.failures_resolved, "pass"],
@@ -681,9 +757,9 @@ function renderCompare(runs) {
         h("select", { on: { change: (e) => startCompare(a.result_id, Number(e.target.value)) } }, runOptions(b.result_id))),
     ),
     h("p", { class: "transition" },
-      h("span", { class: `pill pill-${statusMeta(a.overall_status).key}` }, glyph(a.overall_status, "glyph-sm"), statusMeta(a.overall_status).label),
+      h("span", { class: `pill pill-${statusMeta(runVerdict(a)).key}` }, glyph(runVerdict(a), "glyph-sm"), statusMeta(runVerdict(a)).label),
       h("span", { class: "transition-arrow" }, icon("arrow"), h("span", { class: "sr-only" }, "became")),
-      h("span", { class: `pill pill-${statusMeta(b.overall_status).key}` }, glyph(b.overall_status, "glyph-sm"), statusMeta(b.overall_status).label),
+      h("span", { class: `pill pill-${statusMeta(runVerdict(b)).key}` }, glyph(runVerdict(b), "glyph-sm"), statusMeta(runVerdict(b)).label),
     ),
     groups.length
       ? h("div", { class: "delta" },
@@ -705,8 +781,8 @@ function renderCompare(runs) {
           data.individual_checks.map((c) =>
             h("tr", { class: c.status_a !== c.status_b ? "is-changed" : "" },
               h("th", { scope: "row" }, c.check_name, c.status_a !== c.status_b ? h("span", { class: "changed-tag" }, "Changed") : null),
-              compareCell(c.status_a, c.evidence_a),
-              compareCell(c.status_b, c.evidence_b),
+              compareCell(c.unavailable_a ? "NOT EVALUATED" : c.status_a, c.evidence_a),
+              compareCell(c.unavailable_b ? "NOT EVALUATED" : c.status_b, c.evidence_b),
             ))),
       ),
     ),
@@ -803,8 +879,11 @@ form.addEventListener("submit", async (e) => {
     state.pairs = await api("/api/golden-pairs");
     dialog.close();
     toast(`Saved ${payload.pair_id}`);
+    // A new case has no runs yet, so clear the filters that would hide it
     state.filter = "All";
+    state.statusFilter = null;
     renderFilter();
+    renderTally();
     openCase(payload.pair_id);
   } catch (err) {
     $("form-error").textContent = err.message;

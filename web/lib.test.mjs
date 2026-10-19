@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   extractQuotes, findHighlights, segment, readableResponse, caseTitle, nextCaseId,
   runsByCase, verdictSentence, relativeTime, absoluteTime, parseViewState, serializeViewState, statusMeta,
-  evaluationNote,
+  evaluationNote, checkDisplayStatus, runVerdict, filterCases,
 } from "./lib.js";
 
 test("extracts judge quotes, splitting on ellipses", () => {
@@ -108,6 +108,62 @@ test("evaluation note appears only for Prateek's cases", () => {
   assert.equal(evaluationNote("Anupma"), null);
   assert.equal(evaluationNote(""), null);
   assert.equal(evaluationNote(undefined), null);
+});
+
+test("an unavailable optional check displays as Not evaluated, never as a verdict", () => {
+  assert.equal(checkDisplayStatus({ status: "NEEDS REVIEW", unavailable: true }), "NOT EVALUATED");
+  assert.equal(checkDisplayStatus({ status: "NEEDS REVIEW", unavailable: false }), "NEEDS REVIEW");
+  assert.equal(checkDisplayStatus({ status: "PASS" }), "PASS");
+  assert.deepEqual(statusMeta("NOT EVALUATED"), { key: "unevaluated", label: "Not evaluated" });
+});
+
+test("verdict sentences count only checks that produced a verdict", () => {
+  const checks = [{ status: "PASS" }, { status: "PASS" }, { status: "NOT EVALUATED" }];
+  assert.equal(verdictSentence("PASS", checks), "All 2 checks passed.");
+});
+
+test("runVerdict prefers the display verdict and falls back to the stored status", () => {
+  assert.equal(runVerdict({ overall_status: "NEEDS REVIEW", verdict: "PASS" }), "PASS");
+  assert.equal(runVerdict({ overall_status: "FAIL" }), "FAIL");
+});
+
+const PAIRS = [
+  { pair_id: "A-01", target_app: "Anupma", input: "Dubai trip", expected_behaviour: "" },
+  { pair_id: "A-02", target_app: "Anupma", input: "", expected_behaviour: "Ask for a destination" },
+  { pair_id: "A-03", target_app: "Anupma", input: "London 2020", expected_behaviour: "" },
+  { pair_id: "P-01", target_app: "Prateek", input: "Cedar airflow", expected_behaviour: "" },
+  { pair_id: "P-02", target_app: "Prateek", input: "Maple vs Cedar", expected_behaviour: "" },
+  { pair_id: "P-09", target_app: "Prateek", input: "Never run", expected_behaviour: "" },
+];
+// Newest first, as the API returns them. A-01's latest run is ERROR even though an older one passed.
+const RESULTS = [
+  { result_id: 9, pair_id: "A-01", overall_status: "ERROR", verdict: "ERROR" },
+  { result_id: 8, pair_id: "P-02", overall_status: "NEEDS REVIEW", verdict: "NEEDS REVIEW" },
+  { result_id: 7, pair_id: "P-01", overall_status: "NEEDS REVIEW", verdict: "PASS" },
+  { result_id: 6, pair_id: "A-03", overall_status: "FAIL", verdict: "FAIL" },
+  { result_id: 5, pair_id: "A-02", overall_status: "FAIL", verdict: "FAIL" },
+  { result_id: 4, pair_id: "A-01", overall_status: "PASS", verdict: "PASS" },
+];
+const ids = (filters) => filterCases(PAIRS, RESULTS, filters).map((p) => p.pair_id);
+
+test("each status filter matches cases by their latest run's verdict", () => {
+  assert.deepEqual(ids({ status: "PASS" }), ["P-01"]);
+  assert.deepEqual(ids({ status: "FAIL" }), ["A-02", "A-03"]);
+  assert.deepEqual(ids({ status: "ERROR" }), ["A-01"]);
+  assert.deepEqual(ids({ status: "NEEDS REVIEW" }), ["P-02"]);
+});
+
+test("status filters combine with the target filter and search", () => {
+  assert.deepEqual(ids({ target: "Anupma", status: "FAIL" }), ["A-02", "A-03"]);
+  assert.deepEqual(ids({ target: "Prateek", status: "FAIL" }), []);
+  assert.deepEqual(ids({ target: "Prateek", status: "PASS" }), ["P-01"]);
+  assert.deepEqual(ids({ target: "All", status: "FAIL", query: "london" }), ["A-03"]);
+});
+
+test("clearing the status filter restores every case, including never-run ones", () => {
+  assert.deepEqual(ids({ status: null }), ["A-01", "A-02", "A-03", "P-01", "P-02", "P-09"]);
+  assert.deepEqual(ids({}), ["A-01", "A-02", "A-03", "P-01", "P-02", "P-09"]);
+  assert.ok(!ids({ status: "PASS" }).includes("P-09"), "never-run cases have no latest verdict");
 });
 
 test("statusMeta falls back for unknown statuses", () => {

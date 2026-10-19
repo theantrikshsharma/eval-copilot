@@ -7,7 +7,18 @@ const STATUS_META = {
   FAIL: { key: "fail", label: "Fail" },
   ERROR: { key: "error", label: "Error" },
   "NEEDS REVIEW": { key: "review", label: "Needs review" },
+  // Display-only: an optional check whose provider couldn't run. Not a verdict.
+  "NOT EVALUATED": { key: "unevaluated", label: "Not evaluated" },
 };
+
+export function checkDisplayStatus(check) {
+  return check.unavailable ? "NOT EVALUATED" : check.status;
+}
+
+/** The display verdict from the API, or the stored status for older API responses. */
+export function runVerdict(run) {
+  return run.verdict || run.overall_status;
+}
 
 export function statusMeta(status) {
   return STATUS_META[status] || { key: "unknown", label: status || "Not run" };
@@ -117,6 +128,21 @@ export function runsByCase(results) {
   return byCase;
 }
 
+/** Cases matching the target app, search text and, if set, the verdict of their latest run. */
+export function filterCases(pairs, results, { target = "All", query = "", status = null } = {}) {
+  const needle = query.trim().toLowerCase();
+  const latest = runsByCase(results);
+  return pairs.filter((p) => {
+    if (target !== "All" && p.target_app.toLowerCase() !== target.toLowerCase()) return false;
+    if (needle && ![p.pair_id, p.target_app, p.input, p.expected_behaviour].some((v) => (v || "").toLowerCase().includes(needle))) {
+      return false;
+    }
+    if (!status) return true;
+    const newest = (latest.get(p.pair_id) || [])[0];
+    return Boolean(newest) && runVerdict(newest) === status;
+  });
+}
+
 export function countStatuses(checks) {
   const counts = Object.fromEntries(STATUSES.map((s) => [s, 0]));
   for (const c of checks) if (c.status in counts) counts[c.status] += 1;
@@ -125,7 +151,7 @@ export function countStatuses(checks) {
 
 /** One plain sentence explaining a run's verdict, derived from its checks. */
 export function verdictSentence(status, checks) {
-  const total = checks.length;
+  const total = checks.filter((c) => STATUSES.includes(c.status)).length;
   const counts = countStatuses(checks);
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   switch (status) {

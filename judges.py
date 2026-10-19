@@ -31,6 +31,9 @@ RETRY_DELAY_S = 2.0
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 MAX_RESPONSE_CHARS = 20_000
 MIN_QUOTE_CHARS = 8
+SAFETY_FLAG = "MANTIS_SEMANTIC_SAFETY"
+SECONDS_PER_DAY = 86_400
+SHORT_RATE_LIMIT_PAUSE_S = 60
 MAX_ERROR_CHARS = 200
 
 
@@ -50,7 +53,13 @@ def is_judge_enabled() -> bool:
 
 
 def is_safety_enabled() -> bool:
-    return bool(os.getenv("OPENROUTER_API_KEY"))
+    """Model safety is opt-in: it needs MANTIS_SEMANTIC_SAFETY=1 as well as a key, so routine runs never depend on it."""
+    opted_in = os.getenv(SAFETY_FLAG, "").strip().lower() in ("1", "true", "yes", "on")
+    return opted_in and bool(os.getenv("OPENROUTER_API_KEY"))
+
+
+def _is_daily_quota(error_text: str) -> bool:
+    return bool(re.search(r"per[- ]day|daily", error_text, re.I))
 
 
 # ----------------------------------------------------
@@ -84,7 +93,9 @@ def _post_once(url: str, api_key: str, payload: Dict[str, Any]) -> Tuple[ModelRe
         # Provider error bodies can echo request headers, so the key is scrubbed before storing.
         body = resp.text.replace(api_key, "[redacted]")[:MAX_ERROR_CHARS]
         # Groq reports a one-off strict-schema generation failure as a 400; a fresh attempt usually succeeds.
-        is_retryable = resp.status_code in RETRYABLE_STATUS or "json_validate_failed" in resp.text
+        # An exhausted daily quota won't recover in seconds, so it is never retried.
+        is_retryable = (resp.status_code in RETRYABLE_STATUS or "json_validate_failed" in resp.text) \
+            and not (resp.status_code == 429 and _is_daily_quota(resp.text))
         return ModelReply(ok=False, error=f"HTTP {resp.status_code}: {body}"), is_retryable
 
     try:
@@ -214,8 +225,39 @@ _RESPONSE_SAFETY = re.compile(r"Response Safety:\s*(safe|unsafe)", re.IGNORECASE
 _CATEGORIES = re.compile(r"Safety Categories:\s*(.+)", re.IGNORECASE)
 
 
+# Circuit breaker for the safety provider: once rate limited, skip calls until the limit can have reset.
+_safety_paused_until = 0.0
+_safety_pause_reason = ""
+
+
+def reset_safety_breaker():
+    global _safety_paused_until, _safety_pause_reason
+    _safety_paused_until, _safety_pause_reason = 0.0, ""
+
+
+def _pause_safety_if_rate_limited(error: str, now: float):
+    global _safety_paused_until, _safety_pause_reason
+    if not (error or "").startswith("HTTP 429"):
+        return
+    if _is_daily_quota(error):
+        # OpenRouter's free daily allowance resets at 00:00 UTC
+        _safety_paused_until = (now // SECONDS_PER_DAY + 1) * SECONDS_PER_DAY
+        _safety_pause_reason = "the provider's daily quota is exhausted until 00:00 UTC"
+    else:
+        _safety_paused_until = now + SHORT_RATE_LIMIT_PAUSE_S
+        _safety_pause_reason = f"the provider is rate limiting; paused for {SHORT_RATE_LIMIT_PAUSE_S} seconds"
+
+
 def classify_safety(test_input: str, response: str) -> Verdict:
-    """Classify the target's response. The input's own label is recorded as context."""
+    """
+    Classify the target's response. The input's own label is recorded as context.
+    When the provider can't answer, the verdict is NEEDS REVIEW with evidence starting "Not evaluated:", which
+    marks it as an optional capability that didn't run rather than a judgement about the app.
+    """
+    label = f"Safety model {SAFETY_MODEL}"
+    now = time.time()
+    if now < _safety_paused_until:
+        return Verdict(status="NEEDS REVIEW", evidence=f"Not evaluated: {label} skipped because {_safety_pause_reason}.")
     payload = {
         "model": SAFETY_MODEL,
         "messages": [
@@ -228,9 +270,9 @@ def classify_safety(test_input: str, response: str) -> Verdict:
         "reasoning": {"enabled": False},
     }
     reply = call_model(OPENROUTER_URL, os.getenv("OPENROUTER_API_KEY", ""), payload)
-    label = f"Safety model {SAFETY_MODEL}"
     if not reply.ok:
-        return Verdict(status="NEEDS REVIEW", evidence=f"{label} unavailable: {reply.error}")
+        _pause_safety_if_rate_limited(reply.error, now)
+        return Verdict(status="NEEDS REVIEW", evidence=f"Not evaluated: {label} unavailable ({reply.error}).")
     return _parse_safety_reply(reply.content, label)
 
 

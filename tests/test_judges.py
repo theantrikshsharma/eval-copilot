@@ -22,7 +22,8 @@ from judges import ModelReply
 
 FAKE_GROQ_KEY = "gsk_test_secret_value"
 FAKE_OPENROUTER_KEY = "sk-or-test-secret-value"
-BOTH_KEYS = {"GROQ_API_KEY": FAKE_GROQ_KEY, "OPENROUTER_API_KEY": FAKE_OPENROUTER_KEY}
+# Model safety is opt-in: the key alone doesn't enable it, so these tests set the flag explicitly
+BOTH_KEYS = {"GROQ_API_KEY": FAKE_GROQ_KEY, "OPENROUTER_API_KEY": FAKE_OPENROUTER_KEY, "MANTIS_SEMANTIC_SAFETY": "1"}
 
 ITINERARY = "Here is your 3-day itinerary for Lisbon. Day 1: Belem Tower."
 
@@ -93,6 +94,15 @@ class TestCallModel(unittest.TestCase):
         reply = judges.call_model(judges.GROQ_URL, FAKE_GROQ_KEY, {"model": "m"})
         self.assertTrue(reply.ok)
         self.assertEqual(post.call_count, 2)
+
+    @patch("judges.time.sleep")
+    @patch("judges.requests.post")
+    def test_daily_quota_exhaustion_is_not_retried(self, post, sleep):
+        post.return_value = http_response(429, {"error": {"message": "Rate limit exceeded: free-models-per-day"}})
+        reply = judges.call_model(judges.OPENROUTER_URL, FAKE_OPENROUTER_KEY, {"model": "m"})
+        self.assertFalse(reply.ok)
+        self.assertEqual(post.call_count, 1)
+        sleep.assert_not_called()
 
     @patch("judges.time.sleep")
     @patch("judges.requests.post")
@@ -202,6 +212,11 @@ class TestJudgeBehaviour(unittest.TestCase):
 @patch.dict(os.environ, BOTH_KEYS)
 class TestClassifySafety(unittest.TestCase):
 
+    def setUp(self):
+        # The quota breaker is process-wide; a simulated 429 in one test must not skip calls in the next
+        judges.reset_safety_breaker()
+        self.addCleanup(judges.reset_safety_breaker)
+
     def classify(self, reply: ModelReply):
         with patch("judges.call_model", return_value=reply) as call:
             verdict = judges.classify_safety("How do I make a weapon?", "Sure, here is how.")
@@ -242,6 +257,10 @@ class TestEvaluatorIntegration(unittest.TestCase):
     """Regression guards: the judge and safety check must not change status semantics."""
 
     GENERIC_EXPECTED = "Should ask the user for a destination."
+
+    def setUp(self):
+        judges.reset_safety_breaker()
+        self.addCleanup(judges.reset_safety_breaker)
 
     def test_without_keys_behaviour_is_unchanged(self):
         with without_keys(), patch("judges.call_model") as call:
@@ -306,7 +325,7 @@ class TestEvaluatorIntegration(unittest.TestCase):
         call.assert_not_called()
         self.assertEqual(result.overall_status, "FAIL")
 
-    @patch.dict(os.environ, {"OPENROUTER_API_KEY": FAKE_OPENROUTER_KEY})
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": FAKE_OPENROUTER_KEY, "MANTIS_SEMANTIC_SAFETY": "1"})
     def test_only_safety_key_set_skips_judge(self):
         os.environ.pop("GROQ_API_KEY", None)
         with patch("judges.call_model", return_value=ok_reply("User Safety: safe\nResponse Safety: safe")) as call:

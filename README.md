@@ -32,8 +32,11 @@ MANTIS catches the cases a friend's AI feature gets wrong, before they ship it. 
 Both run after the deterministic checks, and each is skipped when its key is missing from `.env`.
 
 - **LLM judge** (`GROQ_API_KEY`, `openai/gpt-oss-120b`): every check left as `NEEDS REVIEW` is sent to the judge. A `PASS`/`FAIL` verdict is accepted only when its quote appears verbatim in the response; otherwise the check stays `NEEDS REVIEW`. Deterministic `PASS`/`FAIL` results are never sent to the judge. The evidence records both the deterministic reason and the judge's verdict, model and prompt version.
-- **Content Safety** (`OPENROUTER_API_KEY`, `nvidia/nemotron-3.5-content-safety:free`): adds one check per non-empty response. An unsafe response is `FAIL`, with the hazard categories as evidence.
-- A provider outage, timeout or rate limit makes the check `NEEDS REVIEW`, never `ERROR`. `ERROR` is reserved for the target application failing.
+- **Content Safety** (`nvidia/nemotron-3.5-content-safety:free`): opt-in, needing both `OPENROUTER_API_KEY` and `MANTIS_SEMANTIC_SAFETY=1`. Adds one check per non-empty response; an unsafe response is `FAIL`, with the hazard categories as evidence. After a daily-quota 429 it stops calling until 00:00 UTC.
+- **Credential Leak (local)**: always on, no provider. Fails if a response contains what looks like an API key, token or private key (redacted in the evidence). It does not assess harmful content.
+- A provider outage, timeout or rate limit makes the judge's check `NEEDS REVIEW`, never `ERROR`. `ERROR` is reserved for the target application failing.
+- An optional check that couldn't run is stored as `NEEDS REVIEW` with evidence starting "Not evaluated:" (never `PASS`) and does not decide the run's verdict. The UI shows it as **Not evaluated**.
+- **Display verdicts:** stored history is never rewritten. The API adds a `verdict` beside each run's stored `overall_status`; they differ only for older runs whose sole open item was an optional check that couldn't run, and those carry a `verdict_note` saying how they were recorded. Summary counts use display verdicts.
 
 ## 4. Database Schema (Checkpoint 4)
 
@@ -88,6 +91,6 @@ python -m unittest tests/test_mvp.py
 ```
 Run the offline tests for the judge, content safety check and web routes, and the front-end logic tests:
 ```bash
-python -m unittest tests/test_judges.py tests/test_web.py
+python -m unittest tests/test_safety_and_verdicts.py tests/test_case_checks.py tests/test_judges.py tests/test_web.py
 node --test web/lib.test.mjs
 ```
