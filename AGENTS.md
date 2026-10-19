@@ -8,23 +8,24 @@ MANTIS (Machine-Assisted Network Testing & Intelligent Scrutiny, formerly Eval C
 
 | File | Responsibility |
 |---|---|
-| `main.py` | Entrypoint. Serves the web UI at `/`, the API at `/api/*`, and the old Gradio UI at `/classic`. |
+| `main.py` | Entrypoint and Vercel function (`vercel.json`). Serves the web UI at `/`, the API at `/api/*`, and the legacy Gradio UI at `/classic` when `requirements-classic.txt` is installed. |
 | `api.py` | REST endpoints under `/api/*`. |
 | `web/` | The web UI: plain HTML/CSS/JS with no build step, calling `/api/*`. `lib.js` holds the pure logic and is tested by `lib.test.mjs`. Render target output with text nodes only, never `innerHTML`. |
 | `ui.py` | Legacy Gradio UI, kept at `/classic` as a fallback. |
 | `adapters.py` | One adapter per target app. Every call returns an `AdapterResponse` and never raises. |
 | `evaluator.py` | Checks. Turns `AdapterResponse` into an `EvaluationResult` with per-check evidence. Per-case checks from A-05/P-05 onwards apply only when a pair's input exactly matches its entry in `CASE_INPUTS`, so a reused ID never inherits them. Checks marked `(semantic)` go to the LLM judge. |
 | `judges.py` | Model-backed checks: Groq LLM judge for `NEEDS REVIEW` checks, OpenRouter Nemotron content safety. Never raises. |
-| `db.py` | Supabase when `.env` has credentials, otherwise local SQLite (`eval_copilot.db`). Both must behave identically. |
-| `schema.sql` | Postgres schema for Supabase. Keep it in sync with the SQLite DDL in `db.py`. |
+| `db.py` | Supabase when `.env` has credentials, otherwise local SQLite (`eval_copilot.db`, or `MANTIS_SQLITE_PATH`). Both must behave identically: Supabase rows are flattened to the SQLite shape and reads page past the 1,000-row cap. Golden pairs are created insert-only (`create_golden_pair`). |
+| `schema.sql` | Postgres schema for Supabase, with Row Level Security on every table. Keep it in sync with the SQLite DDL in `db.py`. |
+| `scripts/migrate_sqlite_to_supabase.py` | Copies local history to Supabase: dry run by default, backup first, insert-only, idempotent. |
 
 ## Commands
 
 ```bash
-uv venv && source .venv/bin/activate && uv pip install -r requirements.txt
+uv venv && source .venv/bin/activate && uv pip install -r requirements.txt   # add -r requirements-classic.txt for /classic
 uvicorn main:app --reload --port 8000
 python -m unittest tests/test_mvp.py
-python -m unittest tests/test_safety_and_verdicts.py tests/test_case_checks.py tests/test_judges.py tests/test_web.py   # offline
+python -m unittest tests/test_audit_fixes.py tests/test_safety_and_verdicts.py tests/test_case_checks.py tests/test_judges.py tests/test_web.py   # offline
 node --test web/lib.test.mjs                                 # front-end logic
 ```
 
@@ -37,6 +38,8 @@ node --test web/lib.test.mjs                                 # front-end logic
 - Runs are append-only. Re-running a pair creates a new `run_id` and never overwrites an earlier one.
 - Secrets (`SUPABASE_SERVICE_KEY`, `GROQ_API_KEY`) stay server-side in `.env`. Never log them, return them from `/api/*`, or render them in Gradio.
 - Any change to the DB layer must work on both the Supabase and SQLite paths.
+- Tests that write must use a temporary database (`db.use_sqlite_path`), never `eval_copilot.db`.
+- Every endpoint that changes data or calls a target app depends on `require_write_access` in `api.py`.
 
 ## Skills
 

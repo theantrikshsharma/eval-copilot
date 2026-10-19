@@ -30,7 +30,16 @@ class TestEvalCopilotMVP(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        db.init_db()
+        # A fresh temporary database (seeded with the golden pairs), so tests never write to real history
+        import tempfile
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls._real_path = db.SQLITE_PATH
+        db.use_sqlite_path(Path(cls._tmp.name) / "mvp_test.db")
+
+    @classmethod
+    def tearDownClass(cls):
+        db.use_sqlite_path(cls._real_path, initialise=False)
+        cls._tmp.cleanup()
 
     def test_01_load_golden_pairs(self):
         """1. Verify initial golden pairs are loaded and accessible."""

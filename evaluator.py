@@ -682,9 +682,10 @@ def _eval_P01(raw_text: str, checks: List[SingleCheckResult]):
     P-01: Project Cedar meeting room supply airflow (300 m3/h) and occupancy (10).
     """
     text_lower = raw_text.lower()
-    has_300 = "300" in text_lower
-    has_10 = "10" in text_lower
-    has_cedar = "cedar" in text_lower
+    # Exact numbers: "10" must not match "100" or "2010", nor "300" match "3000"
+    has_300 = _has_number(raw_text, "300")
+    has_10 = _has_number(raw_text, "10")
+    has_cedar = bool(re.search(r"\bcedar\b", text_lower))
 
     checks.append(SingleCheckResult(
         check_name="Supply Airflow Fact (300 m³/h)",
@@ -772,11 +773,20 @@ def _eval_P04(resp: AdapterResponse, raw_text: str, checks: List[SingleCheckResu
         evidence_or_reason=f"Target responded in {resp.latency_ms}ms (threshold: 10,000ms)."
     ))
     text_lower = raw_text.lower()
-    has_elm = "elm" in text_lower or "sun" in text_lower or "2.5" in text_lower
+    # Needs both the project and its figure; a bare mention of "sun" used to pass
+    has_elm = bool(re.search(r"\belm\b", text_lower)) and _has_number(raw_text, "2.5")
     checks.append(SingleCheckResult(
         check_name="Valid Retrieval Content",
         status="PASS" if has_elm else "NEEDS REVIEW",
-        evidence_or_reason="Response contains Project Elm / sun hours facts." if has_elm else "Response did not clearly contain expected Project Elm facts."
+        evidence_or_reason="Response names Project Elm and its 2.5-hour sun requirement." if has_elm
+        else "Response did not clearly name Project Elm together with its 2.5-hour requirement."
+    ))
+    cites_section = _has_number(raw_text, "3.1")
+    checks.append(SingleCheckResult(
+        check_name="Section 3.1 Cited",
+        status="PASS" if cites_section else "FAIL",
+        evidence_or_reason="Cites Section 3.1." if cites_section
+        else "Does not cite Section 3.1 of the Project Elm policy, which the expected behaviour requires."
     ))
 
 
@@ -1030,7 +1040,8 @@ def _eval_generic(
     raw_lower = raw_text.lower()
 
     # Look for quoted strings in expected_behaviour
-    quoted_phrases = re.findall(r'["\']([^"\']+)["\']', expected_behaviour)
+    # Double quotes only (straight or curly): apostrophes in "don't" or "user's" are not phrase delimiters
+    quoted_phrases = re.findall(r'["“]([^"”]+)["”]', expected_behaviour)
     if quoted_phrases:
         missing_phrases = [p for p in quoted_phrases if p.lower() not in raw_lower]
         if missing_phrases:

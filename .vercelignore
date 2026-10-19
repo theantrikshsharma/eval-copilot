@@ -1,0 +1,17 @@
+# Never upload secrets, local data or tooling to Vercel
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+.venv/
+venv/
+__pycache__/
+*.pyc
+.claude/
+.vscode/
+.git/
+tests/
+docs/
+web/lib.test.mjs
+requirements-classic.txt

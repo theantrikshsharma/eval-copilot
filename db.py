@@ -12,6 +12,7 @@ Tables:
 
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
@@ -25,7 +26,38 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 # Accept either SUPABASE_SERVICE_KEY or SUPABASE_KEY
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
 
-SQLITE_PATH = Path(__file__).resolve().parent / "eval_copilot.db"
+
+
+# Vercel sets VERCEL/VERCEL_ENV unless a project turns system variables off; its functions run on AWS Lambda,
+# whose runtime always sets LAMBDA_TASK_ROOT and AWS_LAMBDA_FUNCTION_NAME. MANTIS_HOSTED=1 forces hosted mode.
+_HOSTED_MARKERS = ("MANTIS_HOSTED", "VERCEL", "VERCEL_ENV", "LAMBDA_TASK_ROOT", "AWS_LAMBDA_FUNCTION_NAME")
+
+
+def is_hosted() -> bool:
+    """True on a shared, internet-facing deployment, where writes need a token and storage must be durable."""
+    return any(os.getenv(name) for name in _HOSTED_MARKERS)
+
+
+def _default_sqlite_path() -> Path:
+    """
+    MANTIS_SQLITE_PATH overrides everything. On Vercel the project directory is read-only and /tmp is per-instance
+    scratch space, so SQLite goes to /tmp there and is reported as non-durable (see is_durable).
+    """
+    if os.getenv("MANTIS_SQLITE_PATH"):
+        return Path(os.environ["MANTIS_SQLITE_PATH"])
+    if is_hosted():
+        return Path("/tmp/mantis.db")
+    return Path(__file__).resolve().parent / "eval_copilot.db"
+
+
+SQLITE_PATH = _default_sqlite_path()
+SUPABASE_PAGE_SIZE = 1000  # Supabase's default API row cap; reads page through it
+SUPABASE_IN_CHUNK = 200    # keeps `in.(...)` filters well under URL length limits
+TOP_FAILING_LIMIT = 10
+
+
+class GoldenPairExists(Exception):
+    """Raised when creating a golden pair whose ID is already taken. Golden pairs are never silently replaced."""
 
 _supabase_client = None
 _using_supabase = False
@@ -46,32 +78,73 @@ def is_using_supabase() -> bool:
     return _using_supabase
 
 
+def is_durable() -> bool:
+    """Whether saved runs survive restarts and are shared by every server instance."""
+    return _using_supabase or not is_hosted()
+
+
 def get_backend_status() -> Dict[str, Any]:
+    """Public status: no URLs, paths or credentials."""
     if _using_supabase:
-        return {
-            "backend": "Supabase (PostgreSQL)",
-            "url": SUPABASE_URL,
-            "connected": True,
-            "note": "Using Supabase Python SDK for persistent cloud storage."
-        }
-    else:
-        return {
-            "backend": "SQLite (Local Persistent Relational Database)",
-            "path": str(SQLITE_PATH),
-            "connected": True,
-            "note": "Supabase credentials not configured in .env. Using local SQLite database to persist all runs across restarts. To connect Supabase, configure SUPABASE_URL and SUPABASE_SERVICE_KEY in .env and run schema.sql in Supabase SQL editor."
-        }
+        return {"backend": "Supabase (PostgreSQL)", "connected": True, "durable": True}
+    if is_durable():
+        return {"backend": "SQLite (local file)", "connected": True, "durable": True}
+    return {
+        "backend": "SQLite (temporary)", "connected": True, "durable": False,
+        "note": "This deployment has no durable database. Configure SUPABASE_URL and SUPABASE_SERVICE_KEY.",
+    }
 
 
 # ----------------------------------------------------
 # SQLite Initialization & Helpers
 # ----------------------------------------------------
 
+def use_sqlite_path(path: Path, initialise: bool = True):
+    """Point the SQLite backend at another file. Used by tests so they never touch real history."""
+    global SQLITE_PATH
+    SQLITE_PATH = Path(path)
+    if initialise:
+        init_db()
+
+
+@contextmanager
 def _get_sqlite_conn():
+    """Commits on success, rolls back on error, and always closes the connection."""
     conn = sqlite3.connect(str(SQLITE_PATH), timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ----------------------------------------------------
+# Supabase helpers
+# ----------------------------------------------------
+
+def _fetch_all(build_query) -> List[Dict[str, Any]]:
+    """Reads every row by paging past Supabase's per-request row cap. build_query returns a fresh query."""
+    rows: List[Dict[str, Any]] = []
+    start = 0
+    while True:
+        page = build_query().range(start, start + SUPABASE_PAGE_SIZE - 1).execute().data or []
+        rows.extend(page)
+        if len(page) < SUPABASE_PAGE_SIZE:
+            return rows
+        start += SUPABASE_PAGE_SIZE
+
+
+def _flatten_run(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Supabase nests the joined golden pair; SQLite returns flat columns. Return the SQLite shape from both."""
+    pair = row.pop("golden_pairs", None) or {}
+    for key in ("target_app", "input", "expected_behaviour"):
+        row.setdefault(key, pair.get(key))
+    return row
 
 
 def init_db():
@@ -227,6 +300,34 @@ def save_golden_pair(pair_id: str, target_app: str, input_text: str, expected_be
             return get_golden_pair(pair_id)
 
 
+def create_golden_pair(pair_id: str, target_app: str, input_text: str, expected_behaviour: str) -> Dict[str, Any]:
+    """Insert-only. Raises GoldenPairExists instead of replacing an existing pair."""
+    row = {
+        "pair_id": pair_id.strip(),
+        "target_app": target_app.strip(),
+        "input": input_text.strip(),
+        "expected_behaviour": expected_behaviour.strip(),
+    }
+    if _using_supabase:
+        from postgrest.exceptions import APIError
+        try:
+            res = _supabase_client.table("golden_pairs").insert(row).execute()
+        except APIError as e:
+            if getattr(e, "code", None) == "23505":  # unique_violation
+                raise GoldenPairExists(row["pair_id"]) from e
+            raise
+        return res.data[0] if res.data else row
+    try:
+        with _get_sqlite_conn() as conn:
+            conn.execute(
+                "INSERT INTO golden_pairs (pair_id, target_app, input, expected_behaviour) VALUES (?, ?, ?, ?)",
+                (row["pair_id"], row["target_app"], row["input"], row["expected_behaviour"]),
+            )
+    except sqlite3.IntegrityError as e:
+        raise GoldenPairExists(row["pair_id"]) from e
+    return get_golden_pair(row["pair_id"])
+
+
 # ----------------------------------------------------
 # Execution & Check Results
 # ----------------------------------------------------
@@ -265,7 +366,13 @@ def save_run_result(
                 "created_at": ts
             })
         if check_rows:
-            _supabase_client.table("check_results").insert(check_rows).execute()
+            try:
+                # One bulk insert is a single statement, so the checks land all together or not at all
+                _supabase_client.table("check_results").insert(check_rows).execute()
+            except Exception:
+                # Never keep a verdict without the checks that justify it
+                _supabase_client.table("run_results").delete().eq("result_id", result_id).execute()
+                raise
 
         return int(result_id)
     else:
@@ -288,13 +395,14 @@ def save_run_result(
 
 def get_run_results(pair_id: Optional[str] = None, run_id: Optional[str] = None) -> List[Dict[str, Any]]:
     if _using_supabase:
-        q = _supabase_client.table("run_results").select("*, golden_pairs(target_app, input, expected_behaviour)")
-        if pair_id:
-            q = q.eq("pair_id", pair_id)
-        if run_id:
-            q = q.eq("run_id", run_id)
-        res = q.order("timestamp", desc=True).execute()
-        return res.data or []
+        def build():
+            q = _supabase_client.table("run_results").select("*, golden_pairs(target_app, input, expected_behaviour)")
+            if pair_id:
+                q = q.eq("pair_id", pair_id)
+            if run_id:
+                q = q.eq("run_id", run_id)
+            return q.order("timestamp", desc=True).order("result_id", desc=True)
+        return [_flatten_run(r) for r in _fetch_all(build)]
     else:
         with _get_sqlite_conn() as conn:
             query = """
@@ -317,10 +425,11 @@ def get_run_results(pair_id: Optional[str] = None, run_id: Optional[str] = None)
 
 def get_run_result_detail(result_id: int) -> Optional[Dict[str, Any]]:
     if _using_supabase:
-        res = _supabase_client.table("run_results").select("*, golden_pairs(*)").eq("result_id", result_id).execute()
+        res = _supabase_client.table("run_results").select("*, golden_pairs(target_app, input, expected_behaviour)") \
+            .eq("result_id", result_id).execute()
         if not res.data:
             return None
-        run_data = res.data[0]
+        run_data = _flatten_run(res.data[0])
         checks_res = _supabase_client.table("check_results").select("*").eq("result_id", result_id).order("check_result_id").execute()
         run_data["checks"] = checks_res.data or []
         return run_data
@@ -344,40 +453,63 @@ def get_run_result_detail(result_id: int) -> Optional[Dict[str, Any]]:
             return run_data
 
 
+def get_checks_for_results(result_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+    """Checks for many runs in one query (chunked on Supabase), keyed by result_id."""
+    by_result: Dict[int, List[Dict[str, Any]]] = {rid: [] for rid in result_ids}
+    if not result_ids:
+        return by_result
+    if _using_supabase:
+        for i in range(0, len(result_ids), SUPABASE_IN_CHUNK):
+            chunk = result_ids[i:i + SUPABASE_IN_CHUNK]
+            rows = _fetch_all(lambda: _supabase_client.table("check_results").select("*")
+                              .in_("result_id", chunk).order("check_result_id"))
+            for row in rows:
+                by_result[row["result_id"]].append(row)
+        return by_result
+    with _get_sqlite_conn() as conn:
+        placeholders = ",".join("?" for _ in result_ids)
+        cur = conn.execute(
+            f"SELECT * FROM check_results WHERE result_id IN ({placeholders}) ORDER BY check_result_id ASC",
+            list(result_ids),
+        )
+        for row in cur.fetchall():
+            by_result[row["result_id"]].append(dict(row))
+    return by_result
+
+
 def get_all_runs() -> List[str]:
     """Returns list of unique logical run_ids ordered by latest activity."""
     if _using_supabase:
-        res = _supabase_client.table("run_results").select("run_id").order("timestamp", desc=True).execute()
-        seen = []
-        for r in res.data:
-            if r["run_id"] not in seen:
-                seen.append(r["run_id"])
-        return seen
+        rows = _fetch_all(lambda: _supabase_client.table("run_results").select("run_id")
+                          .order("timestamp", desc=True).order("result_id", desc=True))
+        return list(dict.fromkeys(r["run_id"] for r in rows))
     else:
         with _get_sqlite_conn() as conn:
-            cur = conn.execute("SELECT DISTINCT run_id FROM run_results ORDER BY timestamp DESC")
+            cur = conn.execute(
+                "SELECT run_id, MAX(timestamp) AS last_activity FROM run_results GROUP BY run_id ORDER BY last_activity DESC"
+            )
             return [row["run_id"] for row in cur.fetchall()]
 
 
 def get_summary_stats() -> Dict[str, Any]:
     """Calculates counts and top failing checks from persisted database records."""
     if _using_supabase:
-        runs_res = _supabase_client.table("run_results").select("overall_status").execute()
-        runs_data = runs_res.data or []
+        runs_data = _fetch_all(lambda: _supabase_client.table("run_results").select("overall_status").order("result_id"))
         total_runs = len(runs_data)
         pass_count = sum(1 for r in runs_data if r["overall_status"] == "PASS")
         fail_count = sum(1 for r in runs_data if r["overall_status"] == "FAIL")
         error_count = sum(1 for r in runs_data if r["overall_status"] == "ERROR")
         needs_review_count = sum(1 for r in runs_data if r["overall_status"] == "NEEDS REVIEW")
 
-        checks_res = _supabase_client.table("check_results").select("check_name, status").in_("status", ["FAIL", "ERROR"]).execute()
-        checks_data = checks_res.data or []
+        checks_data = _fetch_all(lambda: _supabase_client.table("check_results").select("check_name, status")
+                                 .in_("status", ["FAIL", "ERROR"]).order("check_result_id"))
         fail_counts = {}
         for c in checks_data:
             name = c["check_name"]
             fail_counts[name] = fail_counts.get(name, 0) + 1
 
-        top_failing = sorted([{"check_name": k, "fail_count": v} for k, v in fail_counts.items()], key=lambda x: x["fail_count"], reverse=True)
+        top_failing = sorted([{"check_name": k, "fail_count": v} for k, v in fail_counts.items()],
+                             key=lambda x: x["fail_count"], reverse=True)[:TOP_FAILING_LIMIT]
 
         return {
             "total_executions": total_runs,

@@ -67,14 +67,16 @@ Three relational tables with foreign keys:
 cd ~/Documents/eval-copilot
 uv venv
 source .venv/bin/activate
-uv pip install -r requirements.txt
+uv pip install -r requirements.txt                              # core: web UI, API, evaluator, storage
+uv pip install -r requirements-classic.txt                      # optional: legacy Gradio view at /classic
 ```
 
 ### Step 2: Database Configuration (Optional Supabase)
 To use Supabase:
 1. Create a project at [supabase.com](https://supabase.com).
-2. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`.
+2. Copy `.env.example` to `.env` and fill in `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` (the service-role key: `schema.sql` enables Row Level Security, so the anon key has no access).
 3. Run `schema.sql` in the Supabase SQL Editor.
+4. To bring local history across: `python scripts/migrate_sqlite_to_supabase.py` (dry run, writes a backup to `backups/`), then the same with `--apply`. It never overwrites, re-running copies nothing twice, and the SQLite file is opened read-only.
 
 *Note: If `.env` is omitted, MANTIS runs using the persistent local SQLite database `eval_copilot.db` with identical schema and functionality. The file keeps its original name so existing run history carries over.*
 
@@ -85,12 +87,27 @@ uvicorn main:app --reload --port 8000
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
 
 ## 6. Verification Test Suite
-Run the automated acceptance test script (makes real network calls to the targets):
+Run the automated acceptance test script (makes real network calls to the targets; uses a temporary database):
 ```bash
 python -m unittest tests/test_mvp.py
 ```
-Run the offline tests for the judge, content safety check and web routes, and the front-end logic tests:
+Run the offline tests (no network; anything that writes uses a temporary database) and the front-end logic tests:
 ```bash
-python -m unittest tests/test_safety_and_verdicts.py tests/test_case_checks.py tests/test_judges.py tests/test_web.py
+python -m unittest tests/test_audit_fixes.py tests/test_safety_and_verdicts.py tests/test_case_checks.py tests/test_judges.py tests/test_web.py
 node --test web/lib.test.mjs
 ```
+
+## 7. Deploying to Vercel
+`vercel.json` runs `main.py` as one Python function serving the UI, assets and API. `.vercelignore` keeps `.env`, local databases, the virtualenv and tests out of the upload. Only `requirements.txt` is installed (about 30 MB); the classic Gradio view is local-only.
+
+Hosted deployments are deliberately strict:
+- **Durable storage is required to save anything.** Vercel's filesystem is temporary and per-instance, so without Supabase the app is read-only and says so, rather than accepting runs it would lose.
+- **Writes need `MANTIS_ADMIN_TOKEN`.** Running tests and adding cases send `Authorization: Bearer <token>`; the UI asks for it once per tab. Without the variable, hosted writes are refused.
+- **The interactive API docs are off**, and every page is served with a strict Content Security Policy.
+
+| Variable | Needed for | Environments |
+|---|---|---|
+| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | Durable storage (required to save runs) | Production, Preview |
+| `MANTIS_ADMIN_TOKEN` | Running tests and adding cases | Production, Preview |
+| `GROQ_API_KEY` | Optional LLM judge | Production, Preview |
+| `OPENROUTER_API_KEY` + `MANTIS_SEMANTIC_SAFETY=1` | Optional semantic content safety | Only if wanted |

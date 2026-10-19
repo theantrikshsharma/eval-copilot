@@ -7,3 +7,4 @@ __pycache__/
 eval_copilot.db
 .DS_Store
 .claude/settings.local.json
+backups/

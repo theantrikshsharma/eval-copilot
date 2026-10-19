@@ -1,0 +1,5 @@
+# Optional: the legacy Gradio view at /classic (local use). About 155 MB with its dependencies,
+# so it is kept out of the Vercel deployment. Install alongside requirements.txt:
+#   uv pip install -r requirements.txt -r requirements-classic.txt
+gradio==6.30.0
+pandas==3.0.6

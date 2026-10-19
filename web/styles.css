@@ -281,6 +281,8 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .tally-top li { display: flex; justify-content: space-between; gap: 12px; color: var(--ink-2); }
 .tally-top li strong { color: var(--fail); }
 .tally-store { color: var(--ink-3); font-size: var(--t-xs); }
+.tally-store.is-warning { color: var(--error); font-weight: 600; line-height: 1.45; }
+.dialog-narrow { width: min(420px, calc(100vw - 32px)); }
 
 /* ---------- Case surface ---------- */
 

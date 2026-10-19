@@ -73,15 +73,21 @@ const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: r
 // API
 // ----------------------------------------------------
 
-class ApiError extends Error {}
+class ApiError extends Error {
+  constructor(message, status = 0) {
+    super(message);
+    this.status = status;
+  }
+}
 
 async function api(path, options = {}) {
+  const { token, ...init } = options;
+  const headers = {};
+  if (init.body) headers["Content-Type"] = "application/json";
+  if (token) headers.Authorization = `Bearer ${token}`;
   let resp;
   try {
-    resp = await fetch(path, {
-      headers: options.body ? { "Content-Type": "application/json" } : undefined,
-      ...options,
-    });
+    resp = await fetch(path, { ...init, headers });
   } catch {
     throw new ApiError("Can't reach the MANTIS server. Check that it's running, then try again.");
   }
@@ -93,9 +99,61 @@ async function api(path, options = {}) {
     } catch {
       // Keep the generic message.
     }
-    throw new ApiError(detail);
+    throw new ApiError(detail, resp.status);
   }
   return resp.json();
+}
+
+// The access token lives in sessionStorage: kept for this tab only, never in the page source or URL.
+const TOKEN_KEY = "mantis.accessToken";
+
+function readToken() {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function saveToken(value) {
+  try {
+    if (value) sessionStorage.setItem(TOKEN_KEY, value);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Storage unavailable: the token is simply asked for again next time.
+  }
+}
+
+function askForToken() {
+  const tokenDialog = $("token-dialog");
+  const input = $("token-input");
+  input.value = "";
+  tokenDialog.showModal();
+  input.focus();
+  return new Promise((resolve) => {
+    tokenDialog.addEventListener("close", () => {
+      const token = tokenDialog.returnValue === "save" ? input.value.trim() : "";
+      if (token) saveToken(token);
+      resolve(Boolean(token));
+    }, { once: true });
+  });
+}
+
+/** True when the user can proceed with a write: no token needed, one is stored, or they just entered one. */
+async function ensureWriteAccess() {
+  return !state.writesRequireToken || Boolean(readToken()) || askForToken();
+}
+
+async function apiWrite(path, payload) {
+  try {
+    return await api(path, { method: "POST", body: JSON.stringify(payload), token: readToken() });
+  } catch (err) {
+    if (err.status === 401) {
+      saveToken("");
+      err.message = "That access token was rejected. Try again with the correct token.";
+    }
+    throw err;
+  }
 }
 
 // ----------------------------------------------------
@@ -322,7 +380,9 @@ function renderTally() {
         h("summary", {}, "Checks that fail most"),
         h("ol", {}, top.map((t) => h("li", {}, h("span", {}, t.check_name), h("strong", {}, String(t.fail_count))))))
       : null,
-    state.backend ? h("p", { class: "tally-store" }, `Saved to ${state.backend}`) : null,
+    state.durable === false
+      ? h("p", { class: "tally-store is-warning" }, "Read-only: this deployment has no durable database, so runs can't be saved.")
+      : state.backend ? h("p", { class: "tally-store" }, `Saved to ${state.backend}`) : null,
   );
 }
 
@@ -421,6 +481,7 @@ let runTimer = null;
 async function runTest() {
   const pair = currentPair();
   if (!pair || state.running) return;
+  if (!(await ensureWriteAccess())) return;
   const label = (document.getElementById("run-label")?.value || "").trim();
   state.running = true;
   const started = performance.now();
@@ -429,10 +490,7 @@ async function runTest() {
   runTimer = setInterval(() => updateRunButton(Math.round((performance.now() - started) / 1000)), 1000);
 
   try {
-    const detail = await api("/api/execute", {
-      method: "POST",
-      body: JSON.stringify({ pair_id: pair.pair_id, run_id: label || null }),
-    });
+    const detail = await apiWrite("/api/execute", { pair_id: pair.pair_id, run_id: label || null });
     details.set(detail.result_id, detail);
     [state.results, state.summary] = await Promise.all([api("/api/results"), api("/api/summary")]);
     state.resultId = detail.result_id;
@@ -829,7 +887,7 @@ function updateIdNote() {
   const id = form.pair_id.value.trim();
   const exists = state.pairs.some((p) => p.pair_id.toLowerCase() === id.toLowerCase());
   const note = $("field-id-note");
-  note.textContent = exists ? `${id} already exists. Saving replaces its input and expected behaviour.` : "";
+  note.textContent = exists ? `${id} already exists. Choose another ID.` : "";
   note.classList.toggle("is-warning", exists);
 }
 
@@ -870,12 +928,19 @@ form.addEventListener("submit", async (e) => {
     form[missing[0][0]].focus();
     return;
   }
+  if (state.pairs.some((p) => p.pair_id.toLowerCase() === payload.pair_id.toLowerCase())) {
+    form.pair_id.setAttribute("aria-invalid", "true");
+    $("form-error").textContent = `${payload.pair_id} already exists. Choose another ID.`;
+    form.pair_id.focus();
+    return;
+  }
+  if (!(await ensureWriteAccess())) return;
 
   const save = $("new-case-save");
   save.disabled = true;
   save.textContent = "Saving…";
   try {
-    await api("/api/golden-pairs", { method: "POST", body: JSON.stringify(payload) });
+    await apiWrite("/api/golden-pairs", payload);
     state.pairs = await api("/api/golden-pairs");
     dialog.close();
     toast(`Saved ${payload.pair_id}`);
@@ -954,7 +1019,11 @@ async function init() {
       api("/api/golden-pairs"), api("/api/results"), api("/api/summary"), api("/api/health"),
     ]);
     const backend = (health.database?.backend || "").split(" (")[0];
-    Object.assign(state, { pairs, results, summary, backend });
+    Object.assign(state, {
+      pairs, results, summary, backend,
+      durable: health.database?.durable !== false,
+      writesRequireToken: Boolean(health.writes_require_token),
+    });
   } catch (err) {
     $("view").setAttribute("aria-busy", "false");
     $("view").replaceChildren(

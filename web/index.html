@@ -125,5 +125,20 @@
       </div>
     </form>
   </dialog>
+
+  <dialog class="dialog dialog-narrow" id="token-dialog" aria-labelledby="token-title">
+    <form method="dialog">
+      <h2 id="token-title">Access token</h2>
+      <p class="help" id="token-help">Running tests and adding cases on this deployment needs its access token. It's kept for this browser tab only.</p>
+      <div class="field">
+        <label for="token-input">Token</label>
+        <input id="token-input" type="password" autocomplete="off" spellcheck="false" aria-describedby="token-help" required>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary" value="save">Continue</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

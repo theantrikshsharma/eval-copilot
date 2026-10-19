@@ -8,16 +8,20 @@ Provides clean REST API endpoints for:
 - Aggregating Metrics & Summaries
 """
 
+import hmac
+import os
 import time
 from collections import Counter
-from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException, Query
+from typing import Optional, List, Dict, Any, Literal
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 import db
 from adapters import invoke_target
 from evaluator import effective_status, evaluate_response, is_unavailable_capability
 
+# Hosted deployments hide the interactive docs and refuse writes without a token (see db.is_hosted).
+HOSTED = db.is_hosted()
 
 app = FastAPI(
     title="MANTIS API",
@@ -25,25 +29,77 @@ app = FastAPI(
         "MANTIS (Machine-Assisted Network Testing & Intelligent Scrutiny) runs golden test cases against live "
         "AI applications and scores every response with evidence. Hunt failures. Prove reliability."
     ),
-    version="1.0.0"
+    version="1.0.0",
+    docs_url=None if HOSTED else "/docs",
+    redoc_url=None if HOSTED else "/redoc",
+    openapi_url=None if HOSTED else "/openapi.json",
 )
+
+# Scripts only from this origin; styles allow inline attributes (used for animation offsets) and Google Fonts.
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; "
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if not request.url.path.startswith("/classic"):  # the legacy Gradio view ships its own scripts
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+    return response
+
+
+# ----------------------------------------------------
+# Write access
+# ----------------------------------------------------
+
+def require_write_access(authorization: Optional[str] = Header(default=None)):
+    """
+    Guards every endpoint that changes data or calls a target app.
+    - MANTIS_ADMIN_TOKEN set: requires `Authorization: Bearer <token>`.
+    - Not set: allowed locally, refused on a hosted deployment.
+    - Storage not durable: refused, so a run is never accepted and then silently lost.
+    """
+    token = os.getenv("MANTIS_ADMIN_TOKEN", "")
+    if token:
+        supplied = authorization[7:] if authorization and authorization.lower().startswith("bearer ") else ""
+        if not hmac.compare_digest(supplied.encode(), token.encode()):
+            raise HTTPException(status_code=401, detail="An access token is required to change data.",
+                                headers={"WWW-Authenticate": "Bearer"})
+    elif db.is_hosted():
+        raise HTTPException(status_code=403,
+                            detail="Writes are disabled on this deployment until MANTIS_ADMIN_TOKEN is configured.")
+    if not db.is_durable():
+        raise HTTPException(status_code=503,
+                            detail="This deployment has no durable database, so it can't save runs or test cases. "
+                                   "Configure Supabase first.")
 
 
 # ----------------------------------------------------
 # Pydantic Request / Response Models
 # ----------------------------------------------------
 
+PAIR_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$"
+MAX_TEXT_CHARS = 20_000
+
+
 class GoldenPairIn(BaseModel):
-    pair_id: str = Field(..., description="Unique test case identifier (e.g. A-01, P-01)")
-    target_app: str = Field(..., description="Target application name ('Anupma' or 'Prateek')")
-    input: str = Field(..., description="Exact test input sent to the target application")
-    expected_behaviour: str = Field(..., description="Expected behavioural outcome or constraint")
+    pair_id: str = Field(..., pattern=PAIR_ID_PATTERN, description="Unique test case identifier (e.g. A-01, P-01)")
+    target_app: Literal["Anupma", "Prateek"] = Field(..., description="Target application")
+    input: str = Field(..., max_length=MAX_TEXT_CHARS, description="Exact test input sent to the target application")
+    expected_behaviour: str = Field(..., min_length=1, max_length=MAX_TEXT_CHARS,
+                                    description="Expected behavioural outcome or constraint")
 
 
 class ExecuteRequest(BaseModel):
-    pair_id: str
-    run_id: Optional[str] = None
-    timeout: float = 20.0
+    pair_id: str = Field(..., max_length=64)
+    run_id: Optional[str] = Field(default=None, max_length=80)
+    timeout: float = Field(default=20.0, ge=1, le=60)
 
 
 # ----------------------------------------------------
@@ -72,10 +128,12 @@ def annotate_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def annotate_results(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Only stored NEEDS REVIEW runs can be reinterpreted, so only those need their checks loaded."""
+    """Only stored NEEDS REVIEW runs can be reinterpreted, so only their checks are loaded, in one batch."""
+    review_ids = [row["result_id"] for row in rows if row["overall_status"] == "NEEDS REVIEW"]
+    checks_by_result = db.get_checks_for_results(review_ids) if review_ids else {}
     for row in rows:
         if row["overall_status"] == "NEEDS REVIEW":
-            detail = annotate_detail(db.get_run_result_detail(row["result_id"]))
+            detail = annotate_detail({"overall_status": row["overall_status"], "checks": checks_by_result[row["result_id"]]})
             row["verdict"], row["verdict_note"] = detail["verdict"], detail["verdict_note"]
         else:
             row["verdict"], row["verdict_note"] = row["overall_status"], None
@@ -91,6 +149,7 @@ def health():
     return {
         "status": "healthy",
         "database": db.get_backend_status(),
+        "writes_require_token": bool(os.getenv("MANTIS_ADMIN_TOKEN")),
         "targets": {
             "Anupma": "https://04-gradio-client.vercel.app/gradio_api/run/predict",
             "Prateek": "https://knowledge-retriever-mvp.vercel.app/api/ans_fact"
@@ -111,17 +170,22 @@ def get_golden_pair(pair_id: str):
     return pair
 
 
-@app.post("/api/golden-pairs")
-def create_or_update_golden_pair(pair_in: GoldenPairIn):
-    return db.save_golden_pair(
-        pair_id=pair_in.pair_id,
-        target_app=pair_in.target_app,
-        input_text=pair_in.input,
-        expected_behaviour=pair_in.expected_behaviour
-    )
+@app.post("/api/golden-pairs", dependencies=[Depends(require_write_access)])
+def create_golden_pair(pair_in: GoldenPairIn):
+    """Creates a golden pair. Existing IDs are rejected with 409 rather than overwritten."""
+    try:
+        return db.create_golden_pair(
+            pair_id=pair_in.pair_id,
+            target_app=pair_in.target_app,
+            input_text=pair_in.input,
+            expected_behaviour=pair_in.expected_behaviour
+        )
+    except db.GoldenPairExists:
+        raise HTTPException(status_code=409,
+                            detail=f"Golden pair '{pair_in.pair_id}' already exists. Choose another ID.")
 
 
-@app.post("/api/execute")
+@app.post("/api/execute", dependencies=[Depends(require_write_access)])
 def execute_test(req: ExecuteRequest):
     """
     Executes a golden test case against its target application:

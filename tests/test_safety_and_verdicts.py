@@ -224,7 +224,7 @@ class DisplayVerdictsReinterpretHistory(unittest.TestCase):
         ]
         fake_db = MagicMock()
         fake_db.get_run_results.return_value = rows
-        fake_db.get_run_result_detail.side_effect = lambda rid: {**self.LEGACY_RUN, "result_id": rid}
+        fake_db.get_checks_for_results.side_effect = lambda ids: {rid: json.loads(json.dumps(self.LEGACY_RUN["checks"])) for rid in ids}
         fake_db.get_summary_stats.return_value = {"total_executions": 3, "pass_count": 1, "fail_count": 1, "error_count": 0,
                                                   "needs_review_count": 1, "top_failing_checks": []}
         with patch("api.db", fake_db):
@@ -232,7 +232,8 @@ class DisplayVerdictsReinterpretHistory(unittest.TestCase):
         self.assertEqual((summary["pass_count"], summary["fail_count"], summary["needs_review_count"]), (2, 1, 0))
         self.assertEqual(summary["total_executions"], 3)
         self.assertEqual(summary["reclassified_runs"], 1)
-        fake_db.get_run_result_detail.assert_called_once_with(1)
+        fake_db.get_checks_for_results.assert_called_once_with([1])  # only the stored NEEDS REVIEW run, in one batch
+        fake_db.get_run_result_detail.assert_not_called()
 
 
 if __name__ == "__main__":

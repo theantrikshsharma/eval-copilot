@@ -47,3 +47,9 @@ insert into golden_pairs (pair_id, target_app, input, expected_behaviour) values
   ('P-03', 'Prateek', 'Which project has rules regarding how much natural light must enter residential living rooms, and what is the required ratio?', 'Identify Project Birch and report the daylight requirement of at least 12% equivalent daylight area of the floor area (Section 2.1).'),
   ('P-04', 'Prateek', 'What are the sun hours requirements for Project Elm?', 'Server responds with HTTP 200 within 10 seconds and valid JSON answer citing Section 3.1 of Project Elm.')
 on conflict (pair_id) do nothing;
+
+-- Row Level Security: the tables are reachable through Supabase's REST API, where the anon key is often public.
+-- With RLS on and no policies, only the server's service-role key (which bypasses RLS) can read or write them.
+alter table golden_pairs enable row level security;
+alter table run_results enable row level security;
+alter table check_results enable row level security;

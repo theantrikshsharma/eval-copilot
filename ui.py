@@ -125,7 +125,10 @@ def run_single_evaluation(pair_choice, run_id_input):
 def create_pair(pair_id, target_app, input_text, expected_behaviour):
     if not pair_id or not target_app or not expected_behaviour:
         return "Error: Pair ID, Target App, and Expected Behaviour cannot be blank.", build_pairs_table()
-    db.save_golden_pair(pair_id, target_app, input_text, expected_behaviour)
+    try:
+        db.create_golden_pair(pair_id, target_app, input_text, expected_behaviour)
+    except db.GoldenPairExists:
+        return f"Error: golden pair '{pair_id}' already exists. Choose another ID.", build_pairs_table()
     return f"Successfully saved golden pair '{pair_id}'!", build_pairs_table()
 
 
