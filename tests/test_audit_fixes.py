@@ -267,6 +267,14 @@ class SecurityAndDeployment(unittest.TestCase):
             self.assertIn("frame-ancestors 'none'", headers["content-security-policy"], path)
             self.assertIn("script-src 'self'", headers["content-security-policy"], path)
 
+    def test_httpx_does_not_log_database_request_urls(self):
+        # httpx logs every Supabase request URL (project URL + query filters) at INFO; hosted logs must not carry them
+        import logging
+        httpx_logger = logging.getLogger("httpx")
+        self.assertEqual(httpx_logger.level, logging.WARNING)
+        self.assertFalse(httpx_logger.isEnabledFor(logging.INFO), "request URLs would still be logged")
+        self.assertTrue(httpx_logger.isEnabledFor(logging.WARNING), "real httpx warnings must still be logged")
+
     def test_vercel_config_routes_to_main_and_disables_git_deployments(self):
         import json
         config = json.loads((PROJECT_ROOT / "vercel.json").read_text())

@@ -10,6 +10,7 @@ Tables:
 - CHECK_RESULTS (check_result_id, result_id, check_name, status, evidence_or_reason, created_at)
 """
 
+import logging
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -23,6 +24,10 @@ ENV_PATH = Path(__file__).resolve().parent / ".env"
 TEST_MODE = bool(os.getenv("MANTIS_TEST_MODE"))
 if not TEST_MODE:
     load_dotenv(ENV_PATH)
+
+# httpx (used by the Supabase client) logs every request URL, including the project URL and query filters,
+# at INFO. Hosted platforms capture INFO logs, so keep only warnings and errors.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 # Accept either SUPABASE_SERVICE_KEY or SUPABASE_KEY
