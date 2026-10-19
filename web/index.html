@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#e6eaee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#10161c" media="(prefers-color-scheme: dark)">
+  <title>Eval Co-pilot</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2317212B'/%3E%3Cpath d='M9 8H7v16h2M23 8h2v16h-2' stroke='%23fff' stroke-width='2.4' fill='none'/%3E%3Cpath d='m11.5 16.5 3 3 6-7' stroke='%235FD39A' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&family=Spline+Sans+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script type="module" src="/assets/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to test case</a>
+
+  <div class="shell">
+    <aside class="rail" id="rail" aria-label="Test cases">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M9 8H7v16h2M23 8h2v16h-2" />
+          <path class="brand-tick" d="m11.5 16.5 3 3 6-7" />
+        </svg>
+        <span class="brand-name" translate="no">Eval Co-pilot</span>
+        <button class="icon-btn rail-close" id="rail-close" type="button" aria-label="Close case list">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+        </button>
+      </div>
+
+      <div class="rail-tools">
+        <label class="search">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+          <input type="search" id="case-search" placeholder="Search cases" aria-label="Search cases" autocomplete="off" spellcheck="false">
+          <kbd aria-hidden="true">/</kbd>
+        </label>
+        <div class="segmented" id="target-filter" role="radiogroup" aria-label="Show cases for"></div>
+      </div>
+
+      <nav class="case-nav" aria-label="Cases">
+        <ul class="case-list" id="case-list"></ul>
+      </nav>
+
+      <button class="btn btn-quiet new-case-btn" id="new-case-btn" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
+        New test case
+      </button>
+
+      <section class="tally" id="tally" aria-label="All runs"></section>
+    </aside>
+
+    <div class="scrim" id="scrim" hidden></div>
+
+    <main class="bench" id="main" tabindex="-1">
+      <div class="mobile-bar">
+        <button class="btn btn-quiet" id="rail-toggle" type="button" aria-controls="rail" aria-expanded="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" /></svg>
+          Cases
+        </button>
+        <span class="brand-name" translate="no">Eval Co-pilot</span>
+      </div>
+      <div id="view" class="view" aria-busy="true">
+        <div class="skeleton" aria-hidden="true"><span></span><span></span><span></span></div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <div class="sr-only" id="announcer" aria-live="assertive"></div>
+
+  <dialog class="dialog" id="new-case-dialog" aria-labelledby="new-case-title">
+    <form id="new-case-form" novalidate>
+      <h2 id="new-case-title">New test case</h2>
+
+      <fieldset class="field">
+        <legend>Target app</legend>
+        <div class="choice-row">
+          <label class="choice">
+            <input type="radio" name="target_app" value="Anupma" checked>
+            <span><strong>Anupma</strong><small>Travel itinerary generator</small></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="target_app" value="Prateek">
+            <span><strong>Prateek</strong><small>Knowledge retrieval</small></span>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="field">
+        <label for="field-id">Case ID</label>
+        <input id="field-id" name="pair_id" autocomplete="off" spellcheck="false" aria-describedby="field-id-note" required>
+        <p class="note" id="field-id-note"></p>
+      </div>
+
+      <div class="field">
+        <label for="field-input">Input</label>
+        <p class="help" id="field-input-help">Exactly what gets sent to the app.</p>
+        <textarea id="field-input" name="input" rows="3" aria-describedby="field-input-help" required></textarea>
+      </div>
+
+      <div class="field">
+        <label for="field-expected">Expected behaviour</label>
+        <p class="help" id="field-expected-help">What a good response does. Put exact phrases in "double quotes" and they're checked automatically.</p>
+        <textarea id="field-expected" name="expected_behaviour" rows="3" aria-describedby="field-expected-help" required></textarea>
+      </div>
+
+      <p class="form-error" id="form-error" role="alert"></p>
+
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" type="button" id="new-case-cancel">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="new-case-save">Save test case</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

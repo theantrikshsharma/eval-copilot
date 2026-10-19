@@ -1,0 +1,107 @@
+// Run: node --test web/
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  extractQuotes, findHighlights, segment, readableResponse, caseTitle, nextCaseId,
+  runsByCase, verdictSentence, relativeTime, absoluteTime, parseViewState, serializeViewState, statusMeta,
+} from "./lib.js";
+
+test("extracts judge quotes, splitting on ellipses", () => {
+  const ev = 'Judge openai/gpt-oss-120b [judge-v2]: FAIL. Invented a city. Quote: "itinerary for Barcelona ... Day 1"';
+  assert.deepEqual(extractQuotes(ev), ["itinerary for Barcelona", "Day 1"]);
+});
+
+test("extracts single-quoted values without catching apostrophes", () => {
+  const ev = "App generated an itinerary for 'Lisbon' despite blank input. The user's kids' menu";
+  assert.deepEqual(extractQuotes(ev), ["Lisbon"]);
+});
+
+test("extracts keyword lists from deterministic evidence", () => {
+  const ev = "Itinerary for 2 adults contains child-oriented keywords: kid, playground.";
+  assert.deepEqual(extractQuotes(ev), ["kid", "playground"]);
+});
+
+test("returns nothing for evidence without quotes", () => {
+  assert.deepEqual(extractQuotes("HTTP 200 received in 312ms"), []);
+  assert.deepEqual(extractQuotes(""), []);
+});
+
+test("highlights ignore case and whitespace, and merge overlaps", () => {
+  const text = "Here is your\n  itinerary for BARCELONA. Day 1: Sagrada";
+  const ranges = findHighlights(text, ["itinerary for barcelona", "for Barcelona. Day"]);
+  assert.equal(ranges.length, 1);
+  assert.equal(text.slice(ranges[0].start, ranges[0].end), "itinerary for BARCELONA. Day");
+});
+
+test("needles with regex characters are matched literally", () => {
+  const ranges = findHighlights("cost is (12%) total", ["(12%)"]);
+  assert.deepEqual(ranges, [{ start: 8, end: 13 }]);
+});
+
+test("segment splits text around ranges", () => {
+  assert.deepEqual(segment("abcdef", [{ start: 2, end: 4 }]), [
+    { text: "ab", marked: false }, { text: "cd", marked: true }, { text: "ef", marked: false },
+  ]);
+});
+
+test("readableResponse decodes JSON escapes and leaves text alone", () => {
+  assert.equal(readableResponse('{"a":"caf\\u00e9"}'), '{\n  "a": "café"\n}');
+  assert.equal(readableResponse("plain text"), "plain text");
+  assert.equal(readableResponse("300"), "300");
+  assert.equal(readableResponse(""), "");
+});
+
+test("caseTitle uses the first sentence or trims on a word boundary", () => {
+  assert.equal(caseTitle("Plan a 3-day trip to Dubai for 2 adults. Maximum 1 activity per day."), "Plan a 3-day trip to Dubai for 2 adults");
+  assert.equal(caseTitle("one two three four five", 10), "one two…");
+  assert.equal(caseTitle("Short."), "Short.");
+});
+
+test("nextCaseId continues the target's numbering", () => {
+  const pairs = [{ pair_id: "A-01" }, { pair_id: "A-04" }, { pair_id: "P-02" }, { pair_id: "TEST-01" }];
+  assert.equal(nextCaseId(pairs, "Anupma"), "A-05");
+  assert.equal(nextCaseId(pairs, "Prateek"), "P-03");
+  assert.equal(nextCaseId([], "Prateek"), "P-01");
+});
+
+test("runsByCase keeps newest-first order per case", () => {
+  const grouped = runsByCase([
+    { pair_id: "A-01", result_id: 3 }, { pair_id: "P-01", result_id: 2 }, { pair_id: "A-01", result_id: 1 },
+  ]);
+  assert.deepEqual(grouped.get("A-01").map((r) => r.result_id), [3, 1]);
+});
+
+test("verdictSentence explains each status", () => {
+  const checks = [{ status: "PASS" }, { status: "FAIL" }, { status: "NEEDS REVIEW" }];
+  assert.equal(verdictSentence("FAIL", checks), "1 of 3 checks failed.");
+  assert.equal(verdictSentence("PASS", [{ status: "PASS" }]), "All 1 check passed.");
+  assert.match(verdictSentence("NEEDS REVIEW", checks), /^1 check couldn't/);
+  assert.match(verdictSentence("ERROR", []), /didn't return a usable response/);
+});
+
+test("relativeTime reads timestamps with and without a zone", () => {
+  const now = new Date("2026-10-20T12:00:00Z");
+  assert.equal(relativeTime("2026-10-20T11:00:00+00:00", now), "1 hour ago");
+  assert.equal(relativeTime("2026-10-20 11:58:00", now), "2 minutes ago");
+  assert.equal(relativeTime("2026-10-20T11:59:50Z", now), "just now");
+  assert.equal(relativeTime("garbage", now), "");
+});
+
+test("absoluteTime formats a full date, or nothing for bad input", () => {
+  assert.match(absoluteTime("2026-10-20T11:00:00Z"), /2026/);
+  assert.equal(absoluteTime("garbage"), "");
+});
+
+test("view state round-trips through the URL", () => {
+  const state = { caseId: "A-02", resultId: 17, checkIndex: 1, compare: [12, 17] };
+  assert.deepEqual(parseViewState(serializeViewState(state)), state);
+  assert.equal(serializeViewState(state), "?case=A-02&run=17&check=1&compare=12,17");
+  assert.deepEqual(parseViewState("?case=A-01&run=abc&compare=1"), {
+    caseId: "A-01", resultId: null, checkIndex: null, compare: null,
+  });
+});
+
+test("statusMeta falls back for unknown statuses", () => {
+  assert.equal(statusMeta("NEEDS REVIEW").key, "review");
+  assert.equal(statusMeta("NOT RUN").label, "NOT RUN");
+});

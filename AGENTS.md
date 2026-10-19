@@ -8,9 +8,10 @@ Eval Co-pilot runs golden test inputs against live third-party LLM apps, scores 
 
 | File | Responsibility |
 |---|---|
-| `main.py` | Entrypoint. Mounts the Gradio UI onto FastAPI at `/`. |
+| `main.py` | Entrypoint. Serves the web UI at `/`, the API at `/api/*`, and the old Gradio UI at `/classic`. |
 | `api.py` | REST endpoints under `/api/*`. |
-| `ui.py` | Gradio UI (Test Cases, Failure Inspector, Run Comparison, Summary). |
+| `web/` | The web UI: plain HTML/CSS/JS with no build step, calling `/api/*`. `lib.js` holds the pure logic and is tested by `lib.test.mjs`. Render target output with text nodes only, never `innerHTML`. |
+| `ui.py` | Legacy Gradio UI, kept at `/classic` as a fallback. |
 | `adapters.py` | One adapter per target app. Every call returns an `AdapterResponse` and never raises. |
 | `evaluator.py` | Checks. Turns `AdapterResponse` into an `EvaluationResult` with per-check evidence. |
 | `judges.py` | Model-backed checks: Groq LLM judge for `NEEDS REVIEW` checks, OpenRouter Nemotron content safety. Never raises. |
@@ -23,6 +24,8 @@ Eval Co-pilot runs golden test inputs against live third-party LLM apps, scores 
 uv venv && source .venv/bin/activate && uv pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 python -m unittest tests/test_mvp.py
+python -m unittest tests/test_judges.py tests/test_web.py   # offline
+node --test web/lib.test.mjs                                 # front-end logic
 ```
 
 `tests/test_mvp.py` makes **real network calls** to the target apps on Vercel, so failures can come from a target being down rather than from the code. Write new evaluator tests against a hand-built `AdapterResponse` so they run offline.

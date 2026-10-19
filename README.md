@@ -4,9 +4,9 @@ Eval Co-pilot catches the cases a friend's AI feature gets wrong, before they sh
 
 ## 1. Architecture
 
-- **Frontend:** Gradio 6.x interactive UI with 4 dedicated sections (Test Cases, Failure Inspector, Run Comparison, Summary).
+- **Frontend:** A single-workspace web UI in `web/` (plain HTML/CSS/JS, no build step) served at `/`. Pick a test case, run it, read the verdict, select a check to highlight its evidence inside the actual response, and compare any two runs. Every view is a shareable URL. The original Gradio UI remains at `/classic`.
 - **Backend:** FastAPI REST API exposing `/api/golden-pairs`, `/api/execute`, `/api/results`, `/api/compare`, and `/api/summary`.
-- **Integration:** Gradio is mounted directly into FastAPI (`gr.mount_gradio_app`), providing both the interactive web UI at `/` and headless REST API endpoints at `/api/...` on a single unified origin (`http://127.0.0.1:8000`).
+- **Integration:** One FastAPI server on a single origin (`http://127.0.0.1:8000`) serves the web UI at `/`, the REST API at `/api/...`, and the Gradio UI at `/classic`.
 - **Database:** Supabase PostgreSQL using the official Supabase Python SDK (`supabase>=2.33`). When Supabase credentials are not set, it automatically falls back to a local persistent SQLite database (`eval_copilot.db`) with the identical 3-table relational schema and queries, preserving all data across restarts.
 - **Security:** Privileged credentials remain strictly on the server via environment variables (`.env`). No API keys are exposed to the client browser.
 
@@ -82,7 +82,8 @@ Run the automated acceptance test script (makes real network calls to the target
 ```bash
 python -m unittest tests/test_mvp.py
 ```
-Run the offline tests for the judge and content safety check:
+Run the offline tests for the judge, content safety check and web routes, and the front-end logic tests:
 ```bash
-python -m unittest tests/test_judges.py
+python -m unittest tests/test_judges.py tests/test_web.py
+node --test web/lib.test.mjs
 ```
