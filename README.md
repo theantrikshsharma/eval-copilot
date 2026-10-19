@@ -23,7 +23,15 @@ Eval Co-pilot catches the cases a friend's AI feature gets wrong, before they sh
   - Payload: `{"text": "<query>"}`
   - Response: JSON payload containing `answer` string with citations and source excerpts.
 
-## 3. Database Schema (Checkpoint 4)
+## 3. Model-Backed Checks (optional)
+
+Both run after the deterministic checks, and each is skipped when its key is missing from `.env`.
+
+- **LLM judge** (`GROQ_API_KEY`, `openai/gpt-oss-120b`): every check left as `NEEDS REVIEW` is sent to the judge. A `PASS`/`FAIL` verdict is accepted only when its quote appears verbatim in the response; otherwise the check stays `NEEDS REVIEW`. Deterministic `PASS`/`FAIL` results are never sent to the judge. The evidence records both the deterministic reason and the judge's verdict, model and prompt version.
+- **Content Safety** (`OPENROUTER_API_KEY`, `nvidia/nemotron-3.5-content-safety:free`): adds one check per non-empty response. An unsafe response is `FAIL`, with the hazard categories as evidence.
+- A provider outage, timeout or rate limit makes the check `NEEDS REVIEW`, never `ERROR`. `ERROR` is reserved for the target application failing.
+
+## 4. Database Schema (Checkpoint 4)
 
 Three relational tables with foreign keys:
 1. `GOLDEN_PAIRS`:
@@ -45,7 +53,7 @@ Three relational tables with foreign keys:
    - `status` (TEXT): `PASS`, `FAIL`, `ERROR`, or `NEEDS REVIEW`.
    - `evidence_or_reason` (TEXT): Recorded evidence or failure explanation.
 
-## 4. Setup & Running Locally
+## 5. Setup & Running Locally
 
 ### Step 1: Virtual Environment
 ```bash
@@ -69,8 +77,12 @@ uvicorn main:app --reload --port 8000
 ```
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
 
-## 5. Verification Test Suite
-Run the automated acceptance test script:
+## 6. Verification Test Suite
+Run the automated acceptance test script (makes real network calls to the targets):
 ```bash
 python -m unittest tests/test_mvp.py
+```
+Run the offline tests for the judge and content safety check:
+```bash
+python -m unittest tests/test_judges.py
 ```

@@ -9,6 +9,7 @@ import re
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from adapters import AdapterResponse
+import judges
 
 
 class SingleCheckResult(BaseModel):
@@ -86,6 +87,17 @@ def evaluate_response(
         # Generic deterministic check
         _eval_generic(test_input, expected_behaviour, raw_text, parsed, checks)
 
+    # Model-backed checks run after the deterministic ones, and only when their API key is set
+    if judges.is_judge_enabled():
+        _escalate_to_judge(test_input, expected_behaviour, raw_text, checks)
+    if judges.is_safety_enabled() and raw_text.strip():
+        safety = judges.classify_safety(test_input, raw_text)
+        checks.append(SingleCheckResult(
+            check_name="Content Safety",
+            status=safety.status,
+            evidence_or_reason=safety.evidence
+        ))
+
     # Determine overall status from checks
     overall_status = "PASS"
     fail_reasons = []
@@ -112,6 +124,27 @@ def evaluate_response(
         why_failed=why_failed,
         checks=checks
     )
+
+
+def _escalate_to_judge(
+    test_input: str,
+    expected_behaviour: str,
+    raw_text: str,
+    checks: List[SingleCheckResult]
+):
+    """
+    Sends each NEEDS REVIEW check to the LLM judge. Deterministic PASS and FAIL results are never touched.
+    The check keeps its name, and its evidence records both the deterministic reason and the judge's verdict.
+    """
+    for i, check in enumerate(checks):
+        if check.status != "NEEDS REVIEW":
+            continue
+        verdict = judges.judge_behaviour(check.check_name, test_input, expected_behaviour, raw_text)
+        checks[i] = SingleCheckResult(
+            check_name=check.check_name,
+            status=verdict.status,
+            evidence_or_reason=f"Deterministic: {check.evidence_or_reason} | {verdict.evidence}"
+        )
 
 
 # ----------------------------------------------------

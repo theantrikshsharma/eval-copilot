@@ -13,6 +13,7 @@ Eval Co-pilot runs golden test inputs against live third-party LLM apps, scores 
 | `ui.py` | Gradio UI (Test Cases, Failure Inspector, Run Comparison, Summary). |
 | `adapters.py` | One adapter per target app. Every call returns an `AdapterResponse` and never raises. |
 | `evaluator.py` | Checks. Turns `AdapterResponse` into an `EvaluationResult` with per-check evidence. |
+| `judges.py` | Model-backed checks: Groq LLM judge for `NEEDS REVIEW` checks, OpenRouter Nemotron content safety. Never raises. |
 | `db.py` | Supabase when `.env` has credentials, otherwise local SQLite (`eval_copilot.db`). Both must behave identically. |
 | `schema.sql` | Postgres schema for Supabase. Keep it in sync with the SQLite DDL in `db.py`. |
 
