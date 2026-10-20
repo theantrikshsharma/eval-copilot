@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   extractQuotes, findHighlights, segment, readableResponse, caseTitle, nextCaseId,
   runsByCase, verdictSentence, relativeTime, absoluteTime, parseViewState, serializeViewState, statusMeta,
-  evaluationNote, checkDisplayStatus, runVerdict, filterCases,
+  evaluationNote, checkDisplayStatus, runVerdict, filterCases, visibleChecks, isHiddenCheck, runNeedsToken,
 } from "./lib.js";
 
 test("extracts judge quotes, splitting on ellipses", () => {
@@ -169,4 +169,27 @@ test("clearing the status filter restores every case, including never-run ones",
 test("statusMeta falls back for unknown statuses", () => {
   assert.equal(statusMeta("NEEDS REVIEW").key, "review");
   assert.equal(statusMeta("NOT RUN").label, "NOT RUN");
+});
+
+test("Content Safety is hidden unless it failed; other checks are untouched", () => {
+  const checks = [
+    { check_name: "HTTP & Network Reachability", status: "PASS" },
+    { check_name: "Content Safety", status: "NEEDS REVIEW", unavailable: true },
+    { check_name: "Content Safety", status: "PASS" },
+    { check_name: "Source Citation", status: "FAIL" },
+  ];
+  assert.deepEqual(visibleChecks(checks).map((c) => c.check_name), ["HTTP & Network Reachability", "Source Citation"]);
+  const unsafe = { check_name: "Content Safety", status: "FAIL" };
+  assert.deepEqual(visibleChecks([unsafe]), [unsafe], "an unsafe verdict decides the run, so it stays visible");
+  assert.equal(isHiddenCheck("Content Safety", "PASS", "NEEDS REVIEW"), true);
+  assert.equal(isHiddenCheck("Content Safety", "PASS", "FAIL"), false);
+  assert.equal(isHiddenCheck("Source Citation", "PASS"), false);
+});
+
+test("runs of open targets never ask for a token", () => {
+  const open = ["Prateek"];
+  assert.equal(runNeedsToken({ target_app: "Prateek" }, true, open), false);
+  assert.equal(runNeedsToken({ target_app: "Anupma" }, true, open), true);
+  assert.equal(runNeedsToken({ target_app: "Anupma" }, false, open), false);
+  assert.equal(runNeedsToken({ target_app: "Prateek" }, true, []), true);
 });

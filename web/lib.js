@@ -15,6 +15,22 @@ export function checkDisplayStatus(check) {
   return check.unavailable ? "NOT EVALUATED" : check.status;
 }
 
+// Content Safety stays in stored history but is hidden from view, except a FAIL, which decides the verdict
+const HIDDEN_CHECK = "Content Safety";
+
+export function isHiddenCheck(checkName, ...statuses) {
+  return checkName === HIDDEN_CHECK && !statuses.includes("FAIL");
+}
+
+export function visibleChecks(checks) {
+  return checks.filter((c) => !isHiddenCheck(c.check_name, c.status));
+}
+
+/** True when running this case needs the access token: tokens are on and its target isn't open. */
+export function runNeedsToken(pair, writesRequireToken, openTargets) {
+  return writesRequireToken && !openTargets.includes(pair.target_app);
+}
+
 /** The display verdict from the API, or the stored status for older API responses. */
 export function runVerdict(run) {
   return run.verdict || run.overall_status;

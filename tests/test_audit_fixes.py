@@ -103,11 +103,50 @@ class WriteAccess(TempDatabaseCase):
         self.assertEqual(self.post({"Authorization": "Bearer correct-horse"}).status_code, 200)
 
     @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
-    def test_execute_is_also_protected_and_makes_no_target_call(self):
+    def test_anupma_runs_still_need_the_token_and_make_no_target_call(self):
         with patch("api.invoke_target") as invoke:
             resp = self.client.post("/api/execute", json={"pair_id": "A-01"})
         self.assertEqual(resp.status_code, 401)
         invoke.assert_not_called()
+
+    def execute_prateek(self, headers=None):
+        resp = AdapterResponse(success=True, status_code=200, latency_ms=10.0, raw_response="No reliable answer found.")
+        with patch("api.invoke_target", return_value=resp) as invoke:
+            return self.client.post("/api/execute", json={"pair_id": "P-01"}, headers=headers or {}), invoke
+
+    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
+    def test_prateek_runs_need_no_token(self):
+        resp, invoke = self.execute_prateek()
+        self.assertEqual(resp.status_code, 200, resp.text)
+        invoke.assert_called_once()
+        self.assertEqual(db.get_run_result_detail(resp.json()["result_id"])["pair_id"], "P-01")
+
+    @patch.dict(os.environ, {"VERCEL": "1"})
+    def test_prateek_runs_need_no_token_on_a_hosted_deployment_either(self):
+        with patch("db.is_durable", return_value=True):  # hosted with Supabase, like the Preview
+            self.assertEqual(self.execute_prateek()[0].status_code, 200)
+
+    @patch.dict(os.environ, {"VERCEL": "1"})
+    def test_prateek_runs_still_refused_without_durable_storage(self):
+        with patch("db.is_durable", return_value=False):
+            resp, invoke = self.execute_prateek()
+        self.assertEqual(resp.status_code, 503)
+        invoke.assert_not_called()
+
+    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
+    def test_creating_a_prateek_case_still_needs_the_token(self):
+        resp = self.client.post("/api/golden-pairs", json={**self.PAIR, "target_app": "Prateek"})
+        self.assertEqual(resp.status_code, 401)
+
+    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
+    def test_unknown_case_is_404_without_calling_a_target(self):
+        with patch("api.invoke_target") as invoke:
+            resp = self.client.post("/api/execute", json={"pair_id": "NOPE-1"})
+        self.assertEqual(resp.status_code, 404)
+        invoke.assert_not_called()
+
+    def test_health_lists_targets_that_run_without_a_token(self):
+        self.assertEqual(self.client.get("/api/health").json()["open_execute_targets"], ["Prateek"])
 
     @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
     def test_reads_stay_public(self):

@@ -58,6 +58,11 @@ async def security_headers(request: Request, call_next):
 # Write access
 # ----------------------------------------------------
 
+# Runs against these targets need no token (owner's decision): anyone with the URL can run their cases.
+# Creating cases, and running every other target, still requires write access.
+OPEN_EXECUTE_TARGETS = ["Prateek"]
+
+
 def require_write_access(authorization: Optional[str] = Header(default=None)):
     """
     Guards every endpoint that changes data or calls a target app.
@@ -65,6 +70,11 @@ def require_write_access(authorization: Optional[str] = Header(default=None)):
     - Not set: allowed locally, refused on a hosted deployment.
     - Storage not durable: refused, so a run is never accepted and then silently lost.
     """
+    _require_token(authorization)
+    _require_durable_storage()
+
+
+def _require_token(authorization: Optional[str]):
     token = os.getenv("MANTIS_ADMIN_TOKEN", "")
     if token:
         supplied = authorization[7:] if authorization and authorization.lower().startswith("bearer ") else ""
@@ -74,6 +84,9 @@ def require_write_access(authorization: Optional[str] = Header(default=None)):
     elif db.is_hosted():
         raise HTTPException(status_code=403,
                             detail="Writes are disabled on this deployment until MANTIS_ADMIN_TOKEN is configured.")
+
+
+def _require_durable_storage():
     if not db.is_durable():
         raise HTTPException(status_code=503,
                             detail="This deployment has no durable database, so it can't save runs or test cases. "
@@ -150,6 +163,7 @@ def health():
         "status": "healthy",
         "database": db.get_backend_status(),
         "writes_require_token": bool(os.getenv("MANTIS_ADMIN_TOKEN")),
+        "open_execute_targets": OPEN_EXECUTE_TARGETS,
         "targets": {
             "Anupma": "https://04-gradio-client.vercel.app/gradio_api/run/predict",
             "Prateek": "https://knowledge-retriever-mvp.vercel.app/api/ans_fact"
@@ -185,8 +199,8 @@ def create_golden_pair(pair_in: GoldenPairIn):
                             detail=f"Golden pair '{pair_in.pair_id}' already exists. Choose another ID.")
 
 
-@app.post("/api/execute", dependencies=[Depends(require_write_access)])
-def execute_test(req: ExecuteRequest):
+@app.post("/api/execute")
+def execute_test(req: ExecuteRequest, authorization: Optional[str] = Header(default=None)):
     """
     Executes a golden test case against its target application:
     1. Loads the golden pair
@@ -198,6 +212,10 @@ def execute_test(req: ExecuteRequest):
     pair = db.get_golden_pair(req.pair_id)
     if not pair:
         raise HTTPException(status_code=404, detail=f"Golden pair '{req.pair_id}' not found.")
+    # Write access, checked before any target call; open targets skip only the token
+    if pair["target_app"] not in OPEN_EXECUTE_TARGETS:
+        _require_token(authorization)
+    _require_durable_storage()
 
     # Generate default run_id if not provided
     run_id = req.run_id or f"run_{time.strftime('%Y%m%d_%H%M%S')}"

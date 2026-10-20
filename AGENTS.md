@@ -40,7 +40,8 @@ node --test web/lib.test.mjs                                 # front-end logic
 - Secrets (`SUPABASE_SERVICE_KEY`, `GROQ_API_KEY`) stay server-side in `.env`. Never log them, return them from `/api/*`, or render them in Gradio.
 - Any change to the DB layer must work on both the Supabase and SQLite paths.
 - Tests that write must use a temporary database (`db.use_sqlite_path`), never `eval_copilot.db`.
-- Every endpoint that changes data or calls a target app depends on `require_write_access` in `api.py`.
+- Every endpoint that changes data or calls a target app depends on `require_write_access` in `api.py`. One deliberate exception: `/api/execute` skips only the token for targets in `OPEN_EXECUTE_TARGETS` (Prateek); durable storage is still required, and creating cases still needs the token.
+- The web UI hides Content Safety checks (except a FAIL) and the "not evaluated" notes. They stay in stored history and the API.
 
 ## Skills
 

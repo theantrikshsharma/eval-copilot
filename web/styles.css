@@ -382,13 +382,6 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
   font-size: var(--t-xl); font-weight: 800; line-height: 1; letter-spacing: -0.035em;
 }
 .verdict-sentence { margin-top: 10px; font-size: var(--t-md); max-width: 54ch; }
-.verdict-note { margin-top: 6px; max-width: 62ch; font-size: var(--t-xs); color: var(--ink-3); }
-.capability-note {
-  display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 10px 12px;
-  border: 1px dashed var(--rule-strong); border-radius: 10px;
-  font-size: var(--t-xs); line-height: 1.5; color: var(--ink-2);
-}
-.capability-note .glyph { margin-top: 1px; }
 .check-unevaluated .check-name { color: var(--ink-2); }
 .verdict-side { display: grid; justify-items: end; gap: 10px; }
 .verdict-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 16px; font-size: var(--t-sm); color: var(--ink-2); }

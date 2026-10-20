@@ -1,7 +1,7 @@
 import {
   statusMeta, extractQuotes, findHighlights, segment, readableResponse, caseTitle, nextCaseId,
   runsByCase, verdictSentence, relativeTime, absoluteTime, parseTimestamp, parseViewState, serializeViewState,
-  evaluationNote, checkDisplayStatus, runVerdict, filterCases,
+  evaluationNote, checkDisplayStatus, runVerdict, filterCases, visibleChecks, isHiddenCheck, runNeedsToken,
 } from "./lib.js";
 
 const MAX_HISTORY_CHIPS = 40;
@@ -140,8 +140,8 @@ function askForToken() {
 }
 
 /** True when the user can proceed with a write: no token needed, one is stored, or they just entered one. */
-async function ensureWriteAccess() {
-  return !state.writesRequireToken || Boolean(readToken()) || askForToken();
+async function ensureWriteAccess(needsToken = state.writesRequireToken) {
+  return !needsToken || Boolean(readToken()) || askForToken();
 }
 
 async function apiWrite(path, payload) {
@@ -186,8 +186,12 @@ const state = {
 const details = new Map();
 
 async function loadDetail(resultId) {
-  if (!details.has(resultId)) details.set(resultId, await api(`/api/results/${resultId}`));
+  if (!details.has(resultId)) details.set(resultId, withVisibleChecks(await api(`/api/results/${resultId}`)));
   return details.get(resultId);
+}
+
+function withVisibleChecks(detail) {
+  return { ...detail, checks: visibleChecks(detail.checks) };
 }
 
 function runsFor(caseId) {
@@ -448,7 +452,9 @@ function selectCheck(index) {
 }
 
 async function loadCompare([a, b]) {
-  return api(`/api/compare?result_id_a=${a}&result_id_b=${b}`);
+  const data = await api(`/api/compare?result_id_a=${a}&result_id_b=${b}`);
+  data.individual_checks = data.individual_checks.filter((c) => !isHiddenCheck(c.check_name, c.status_a, c.status_b));
+  return data;
 }
 
 async function startCompare(a, b) {
@@ -481,7 +487,7 @@ let runTimer = null;
 async function runTest() {
   const pair = currentPair();
   if (!pair || state.running) return;
-  if (!(await ensureWriteAccess())) return;
+  if (!(await ensureWriteAccess(runNeedsToken(pair, state.writesRequireToken, state.openExecuteTargets)))) return;
   const label = (document.getElementById("run-label")?.value || "").trim();
   state.running = true;
   const started = performance.now();
@@ -490,7 +496,7 @@ async function runTest() {
   runTimer = setInterval(() => updateRunButton(Math.round((performance.now() - started) / 1000)), 1000);
 
   try {
-    const detail = await apiWrite("/api/execute", { pair_id: pair.pair_id, run_id: label || null });
+    const detail = withVisibleChecks(await apiWrite("/api/execute", { pair_id: pair.pair_id, run_id: label || null }));
     details.set(detail.result_id, detail);
     [state.results, state.summary] = await Promise.all([api("/api/results"), api("/api/summary")]);
     state.resultId = detail.result_id;
@@ -658,7 +664,6 @@ function renderResult(runs) {
       h("div", { class: "verdict-main" },
         h("p", { class: `verdict-word tone-${meta.key}` }, glyph(verdict, "glyph-lg"), h("span", {}, meta.label)),
         h("p", { class: "verdict-sentence" }, verdictSentence(verdict, displayChecks(detail))),
-        detail.verdict_note ? h("p", { class: "verdict-note" }, detail.verdict_note) : null,
       ),
       h("div", { class: "verdict-side" },
         h("p", { class: "verdict-meta" },
@@ -685,21 +690,6 @@ function renderResult(runs) {
 
 function displayChecks(detail) {
   return detail.checks.map((c) => ({ ...c, status: checkDisplayStatus(c) }));
-}
-
-/** States which optional evaluation didn't happen in this run, separately from the verdicts. */
-function capabilityNote(detail) {
-  if (!detail.actual_response) return null;
-  const skipped = detail.checks.filter((c) => c.unavailable).map((c) => c.check_name);
-  const safetyEvaluated = detail.checks.some((c) => c.check_name === "Content Safety" && !c.unavailable);
-  const localOnly = detail.checks.some((c) => c.check_name === "Credential Leak (local)") ? " Only the local credential check ran." : "";
-  let text = null;
-  if (skipped.length) {
-    text = `Not evaluated in this run: ${skipped.join(", ")}. Its provider couldn't answer, so it doesn't count toward the verdict.`;
-  } else if (!safetyEvaluated) {
-    text = `Semantic content safety was not evaluated in this run.${localOnly}`;
-  }
-  return text ? h("p", { class: "capability-note" }, glyph("NOT EVALUATED", "glyph-sm"), h("span", {}, text)) : null;
 }
 
 function renderResultPanes() {
@@ -736,7 +726,6 @@ function renderResultPanes() {
           );
         }),
       ),
-      capabilityNote(detail),
     ),
     renderResponsePane(detail.actual_response, selected),
   );
@@ -1023,6 +1012,7 @@ async function init() {
       pairs, results, summary, backend,
       durable: health.database?.durable !== false,
       writesRequireToken: Boolean(health.writes_require_token),
+      openExecuteTargets: health.open_execute_targets || [],
     });
   } catch (err) {
     $("view").setAttribute("aria-busy", "false");
