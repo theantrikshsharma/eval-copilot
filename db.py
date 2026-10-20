@@ -218,6 +218,17 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_run_results_pair ON run_results(pair_id);
         CREATE INDEX IF NOT EXISTS idx_run_results_run ON run_results(run_id);
         CREATE INDEX IF NOT EXISTS idx_check_results_result ON check_results(result_id);
+
+        CREATE TABLE IF NOT EXISTS universal_configs (
+            config_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            method TEXT NOT NULL,
+            headers_json TEXT NOT NULL DEFAULT '{}',
+            body_template TEXT NOT NULL DEFAULT '',
+            response_path TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
         """)
 
         # Check if golden_pairs is seeded
@@ -417,6 +428,43 @@ def save_run_result(
                 """, (result_id, c["check_name"], c["status"], c.get("evidence_or_reason", ""), ts))
             conn.commit()
             return int(result_id)
+
+
+# ----------------------------------------------------
+# Universal App Testing configurations (insert-only, like golden pairs)
+# ----------------------------------------------------
+
+UNIVERSAL_COLUMNS = ("config_id", "name", "url", "method", "headers_json", "body_template", "response_path")
+
+
+def create_universal_config(row: Dict[str, Any]) -> None:
+    row = {k: row[k] for k in UNIVERSAL_COLUMNS}
+    if _using_supabase:
+        from postgrest.exceptions import APIError
+        try:
+            _supabase_client.table("universal_configs").insert(row).execute()
+        except APIError as e:
+            if getattr(e, "code", None) == "23505":
+                raise GoldenPairExists(row["config_id"]) from e
+            raise
+        return
+    try:
+        with _get_sqlite_conn() as conn:
+            conn.execute(f"INSERT INTO universal_configs ({', '.join(UNIVERSAL_COLUMNS)}) VALUES ({', '.join('?' * len(UNIVERSAL_COLUMNS))})",
+                         tuple(row[k] for k in UNIVERSAL_COLUMNS))
+    except sqlite3.IntegrityError as e:
+        raise GoldenPairExists(row["config_id"]) from e
+
+
+def list_universal_configs() -> List[Dict[str, Any]]:
+    if _using_supabase:
+        return _execute_read(_supabase_client.table("universal_configs").select("*").order("config_id")).data or []
+    with _get_sqlite_conn() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM universal_configs ORDER BY config_id").fetchall()]
+
+
+def get_universal_config(config_id: str) -> Optional[Dict[str, Any]]:
+    return next((c for c in list_universal_configs() if c["config_id"] == config_id), None)
 
 
 def count_recent_runs(target_app: str, since_iso: str) -> int:

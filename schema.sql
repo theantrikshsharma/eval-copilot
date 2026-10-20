@@ -53,3 +53,16 @@ on conflict (pair_id) do nothing;
 alter table golden_pairs enable row level security;
 alter table run_results enable row level security;
 alter table check_results enable row level security;
+
+-- Universal App Testing: saved API configurations (cases reuse golden_pairs with target_app 'Universal:<config_id>')
+create table if not exists universal_configs (
+  config_id text primary key,
+  name text not null,
+  url text not null,
+  method text not null,
+  headers_json text not null default '{}',
+  body_template text not null default '',
+  response_path text not null default '',
+  created_at timestamptz default now()
+);
+alter table universal_configs enable row level security;

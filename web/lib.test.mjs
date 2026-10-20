@@ -193,3 +193,13 @@ test("runs of open targets never ask for a token", () => {
   assert.equal(runNeedsToken({ target_app: "Anupma" }, false, open), false);
   assert.equal(runNeedsToken({ target_app: "Prateek" }, true, []), true);
 });
+
+test("golden pair upload is validated before anything is sent", async () => {
+  const { parseGoldenPairs } = await import("./lib.js");
+  assert.deepEqual(parseGoldenPairs('[{"input": " a ", "expected_behaviour": "b"}]'), { cases: [{ input: "a", expected_behaviour: "b" }], errors: [] });
+  assert.equal(parseGoldenPairs('{"cases": [{"input": "a", "expected_behaviour": "b"}]}').cases.length, 1);
+  assert.deepEqual(parseGoldenPairs("not json").errors, ["This isn't valid JSON."]);
+  assert.deepEqual(parseGoldenPairs("[]").errors, ["Expected a non-empty list of golden pairs."]);
+  assert.match(parseGoldenPairs('[{"input": "a"}]').errors[0], /Pair 1 needs/);
+  assert.match(parseGoldenPairs(JSON.stringify(Array(51).fill({ input: "a", expected_behaviour: "b" }))).errors[0], /At most 50/);
+});

@@ -53,6 +53,14 @@
         New test case
       </button>
 
+      <section class="surprise" aria-labelledby="surprise-title">
+        <h2 class="surprise-title" id="surprise-title">Surprise</h2>
+        <button class="btn btn-quiet new-case-btn" id="universal-btn" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" /></svg>
+          Universal App Testing
+        </button>
+      </section>
+
       <section class="tally" id="tally" aria-label="All runs"></section>
     </aside>
 
@@ -122,6 +130,67 @@
       <div class="dialog-actions">
         <button class="btn btn-quiet" type="button" id="new-case-cancel">Cancel</button>
         <button class="btn btn-primary" type="submit" id="new-case-save">Save test case</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog" id="universal-dialog" aria-labelledby="universal-title">
+    <form id="universal-form" novalidate>
+      <h2 id="universal-title">Universal App Testing</h2>
+      <p class="help">Test any JSON HTTP API with golden pairs. Internal and private addresses are blocked, redirects aren't followed, and header values are never shown again after saving.</p>
+
+      <div class="field">
+        <label for="u-config">API configuration</label>
+        <select id="u-config" name="config"></select>
+      </div>
+
+      <div id="u-new-config">
+        <div class="field">
+          <label for="u-id">Configuration ID</label>
+          <input id="u-id" name="config_id" placeholder="my-bot" autocomplete="off" spellcheck="false" pattern="[a-z0-9][a-z0-9-]{0,23}">
+        </div>
+        <div class="field">
+          <label for="u-name">Name</label>
+          <input id="u-name" name="name" placeholder="My chatbot" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="u-url">Endpoint URL</label>
+          <input id="u-url" name="url" type="url" placeholder="https://api.example.com/chat" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="u-method">Method</label>
+          <select id="u-method" name="method"><option>POST</option><option>GET</option><option>PUT</option><option>PATCH</option></select>
+        </div>
+        <div class="field">
+          <label for="u-headers">Headers (JSON)</label>
+          <p class="help" id="u-headers-help">For example {"Authorization": "Bearer …"}. Stored server-side; only header names are shown afterwards.</p>
+          <textarea id="u-headers" name="headers" rows="2" spellcheck="false" aria-describedby="u-headers-help">{}</textarea>
+        </div>
+        <div class="field">
+          <label for="u-body">Request template (JSON)</label>
+          <p class="help" id="u-body-help">Put {{input}} where each golden pair's input goes. It can also go in the URL.</p>
+          <textarea id="u-body" name="body_template" rows="2" spellcheck="false" aria-describedby="u-body-help">{"input": "{{input}}"}</textarea>
+        </div>
+        <div class="field">
+          <label for="u-path">Response mapping</label>
+          <p class="help" id="u-path-help">Dotted path to the answer, e.g. choices.0.message.content. Leave empty to use the whole body.</p>
+          <input id="u-path" name="response_path" placeholder="answer" autocomplete="off" spellcheck="false" aria-describedby="u-path-help">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="u-pairs">Golden pairs (JSON)</label>
+        <p class="help" id="u-pairs-help">A list of {"input": …, "expected_behaviour": …}. Put exact phrases in "double quotes" to check them automatically.</p>
+        <input id="u-file" type="file" accept="application/json,.json">
+        <textarea id="u-pairs" name="pairs" rows="4" spellcheck="false" aria-describedby="u-pairs-help"></textarea>
+      </div>
+      <div id="u-review"></div>
+
+      <p class="form-error" id="u-error" role="alert"></p>
+
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" type="button" id="u-close">Close</button>
+        <button class="btn btn-primary" type="submit" id="u-run">Save and run</button>
       </div>
     </form>
   </dialog>

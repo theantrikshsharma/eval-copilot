@@ -2,6 +2,7 @@ import {
   statusMeta, extractQuotes, findHighlights, segment, readableResponse, caseTitle, nextCaseId,
   runsByCase, verdictSentence, relativeTime, absoluteTime, parseTimestamp, parseViewState, serializeViewState,
   evaluationNote, checkDisplayStatus, runVerdict, filterCases, visibleChecks, isHiddenCheck, runNeedsToken,
+  parseGoldenPairs,
 } from "./lib.js";
 
 const MAX_HISTORY_CHIPS = 40;
@@ -944,6 +945,116 @@ form.addEventListener("submit", async (e) => {
   } finally {
     save.disabled = false;
     save.textContent = "Save test case";
+  }
+});
+
+// ----------------------------------------------------
+// Surprise: Universal App Testing
+// ----------------------------------------------------
+
+const uDialog = $("universal-dialog");
+const uForm = $("universal-form");
+let uConfigs = [];
+
+function renderUniversalReview() {
+  const text = $("u-pairs").value.trim();
+  const { cases, errors } = text ? parseGoldenPairs(text) : { cases: [], errors: [] };
+  $("u-review").replaceChildren(
+    errors.length
+      ? h("ul", { class: "u-errors" }, errors.map((e) => h("li", {}, e)))
+      : cases.length
+        ? h("div", { class: "table-wrap" }, h("table", { class: "compare-table" },
+          h("caption", {}, `${cases.length} golden pair${cases.length === 1 ? "" : "s"} ready to add`),
+          h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Input"), h("th", { scope: "col" }, "Expected behaviour"))),
+          h("tbody", {}, cases.map((c) => h("tr", {}, h("td", {}, c.input), h("td", {}, c.expected_behaviour)))),
+        ))
+        : null,
+  );
+  return { cases, errors };
+}
+
+async function openUniversal() {
+  $("u-error").textContent = "";
+  try {
+    uConfigs = await api("/api/universal/configs");
+  } catch (err) {
+    uConfigs = [];
+    $("u-error").textContent = err.message;
+  }
+  $("u-config").replaceChildren(
+    h("option", { value: "" }, "New configuration"),
+    ...uConfigs.map((c) => h("option", { value: c.config_id }, `${c.name} (${c.method} ${c.url})`)),
+  );
+  $("u-new-config").hidden = false;
+  renderUniversalReview();
+  uDialog.showModal();
+}
+
+$("universal-btn").addEventListener("click", openUniversal);
+$("u-close").addEventListener("click", () => uDialog.close());
+$("u-config").addEventListener("change", (e) => { $("u-new-config").hidden = Boolean(e.target.value); });
+$("u-pairs").addEventListener("input", renderUniversalReview);
+$("u-file").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  $("u-pairs").value = await file.text();
+  renderUniversalReview();
+});
+
+uForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("u-error").textContent = "";
+  let configId = $("u-config").value;
+  let headers = {};
+  if (!configId) {
+    try {
+      headers = JSON.parse(uForm.headers.value || "{}");
+    } catch {
+      $("u-error").textContent = "Headers must be a JSON object, e.g. {\"Authorization\": \"Bearer …\"}.";
+      return;
+    }
+  }
+  const { cases, errors } = renderUniversalReview();
+  if (errors.length) {
+    $("u-error").textContent = "Fix the golden pairs first.";
+    return;
+  }
+  if (!(await ensureWriteAccess())) return;
+
+  const button = $("u-run");
+  button.disabled = true;
+  try {
+    if (!configId) {
+      button.textContent = "Saving configuration…";
+      const saved = await apiWrite("/api/universal/configs", {
+        config_id: uForm.config_id.value.trim(), name: uForm.name.value.trim(), url: uForm.url.value.trim(),
+        method: uForm.method.value, headers, body_template: uForm.body_template.value.trim(),
+        response_path: uForm.response_path.value.trim(),
+      });
+      configId = saved.config_id;
+      uForm.headers.value = "{}"; // never keep secrets in the page longer than needed
+    }
+    if (cases.length) {
+      button.textContent = "Adding golden pairs…";
+      await apiWrite(`/api/universal/configs/${encodeURIComponent(configId)}/cases`, { cases });
+    }
+    button.textContent = "Running tests…";
+    const out = await apiWrite(`/api/universal/configs/${encodeURIComponent(configId)}/run`, {});
+    [state.pairs, state.results, state.summary] = await Promise.all([api("/api/golden-pairs"), api("/api/results"), api("/api/summary")]);
+    uDialog.close();
+    const counts = out.results.reduce((acc, r) => ({ ...acc, [r.verdict]: (acc[r.verdict] || 0) + 1 }), {});
+    toast(`Ran ${out.results.length} cases: ${Object.entries(counts).map(([k, v]) => `${v} ${statusMeta(k).label.toLowerCase()}`).join(", ")}`);
+    state.filter = "All";
+    state.statusFilter = null;
+    renderFilter();
+    renderTally();
+    const first = out.results.find((r) => r.verdict !== "PASS") || out.results[0];
+    openCase(first.pair_id, { resultId: first.result_id });
+  } catch (err) {
+    $("u-error").textContent = err.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Save and run";
   }
 });
 

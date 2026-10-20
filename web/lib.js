@@ -234,3 +234,24 @@ export function serializeViewState({ caseId, resultId, checkIndex, compare }) {
   const query = params.toString().replace(/%2C/g, ",");
   return query ? `?${query}` : "";
 }
+
+/** Parses and validates uploaded golden pairs: a JSON list (or {cases: [...]}) of {input, expected_behaviour}. */
+export function parseGoldenPairs(text, max = 50) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { cases: [], errors: ["This isn't valid JSON."] };
+  }
+  const list = Array.isArray(data) ? data : data?.cases;
+  if (!Array.isArray(list) || !list.length) return { cases: [], errors: ["Expected a non-empty list of golden pairs."] };
+  if (list.length > max) return { cases: [], errors: [`At most ${max} golden pairs per upload.`] };
+  const errors = [];
+  const cases = list.map((item, i) => {
+    const input = typeof item?.input === "string" ? item.input.trim() : "";
+    const expected = typeof item?.expected_behaviour === "string" ? item.expected_behaviour.trim() : "";
+    if (!input || !expected) errors.push(`Pair ${i + 1} needs a non-empty "input" and "expected_behaviour".`);
+    return { input, expected_behaviour: expected };
+  });
+  return errors.length ? { cases: [], errors } : { cases, errors };
+}

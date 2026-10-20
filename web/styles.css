@@ -629,3 +629,13 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Surprise: Universal App Testing */
+.surprise { display: grid; gap: 6px; }
+.surprise-title { font-size: var(--t-xs); font-weight: 600; color: var(--ink-3); padding: 0 4px; }
+#universal-dialog select { width: 100%; }
+#u-new-config[hidden] { display: none; }
+#u-review caption { text-align: left; font-size: var(--t-sm); color: var(--ink-2); padding-bottom: 6px; }
+#u-review td { vertical-align: top; overflow-wrap: anywhere; }
+.u-errors { color: var(--fail, #ff7a6b); font-size: var(--t-sm); padding-left: 18px; }
+#u-review .compare-table { min-width: 0; table-layout: fixed; }

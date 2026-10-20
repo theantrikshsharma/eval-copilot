@@ -9,7 +9,9 @@ Provides clean REST API endpoints for:
 """
 
 import hmac
+import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -18,6 +20,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 import db
+import universal
 from adapters import invoke_target
 from evaluator import effective_status, evaluate_response, is_unavailable_capability
 
@@ -243,13 +246,23 @@ def execute_test(req: ExecuteRequest, authorization: Optional[str] = Header(defa
 
     # Generate default run_id if not provided
     run_id = req.run_id or f"run_{time.strftime('%Y%m%d_%H%M%S')}"
+    full_detail, _ = _run_and_save(pair, run_id, req.timeout)
+    return full_detail
 
+
+def _invoke_pair(pair: Dict[str, Any], timeout: float):
+    """Universal cases call their saved configuration; the built-in targets use their adapters."""
+    if pair["target_app"].startswith(UNIVERSAL_PREFIX):
+        config = db.get_universal_config(pair["target_app"][len(UNIVERSAL_PREFIX):])
+        if not config:
+            raise HTTPException(status_code=404, detail="This case's API configuration no longer exists.")
+        return universal.invoke(_config_for_call(config), pair["input"], timeout=timeout)
+    return invoke_target(target_app=pair["target_app"], input_text=pair["input"], timeout=timeout)
+
+
+def _run_and_save(pair: Dict[str, Any], run_id: str, timeout: float):
     # 1. Invoke Target Application
-    adapter_resp = invoke_target(
-        target_app=pair["target_app"],
-        input_text=pair["input"],
-        timeout=req.timeout
-    )
+    adapter_resp = _invoke_pair(pair, timeout)
 
     # 2. Evaluate Response
     eval_result = evaluate_response(
@@ -273,7 +286,107 @@ def execute_test(req: ExecuteRequest, authorization: Optional[str] = Header(defa
     # 4. Return Full Result
     full_detail = annotate_detail(db.get_run_result_detail(result_id))
     full_detail["why_failed"] = eval_result.why_failed
-    return full_detail
+    return full_detail, adapter_resp.latency_ms
+
+
+# ----------------------------------------------------
+# Surprise: Universal App Testing (admin only: it calls URLs the user supplies)
+# ----------------------------------------------------
+
+UNIVERSAL_PREFIX = "Universal:"
+MAX_UNIVERSAL_CASES = 50
+MAX_UNIVERSAL_RUN = 20
+UNIVERSAL_CONCURRENCY = 3
+
+
+class UniversalConfigIn(BaseModel):
+    config_id: str = Field(..., pattern=r"^[a-z0-9][a-z0-9-]{0,23}$", description="Short slug, e.g. my-bot")
+    name: str = Field(..., min_length=1, max_length=80)
+    url: str = Field(..., min_length=8, max_length=2000)
+    method: Literal["GET", "POST", "PUT", "PATCH"] = "POST"
+    headers: Dict[str, str] = Field(default_factory=dict, max_length=20)
+    body_template: str = Field(default='{"input": "{{input}}"}', max_length=10_000)
+    response_path: str = Field(default="", max_length=200, pattern=r"^[A-Za-z0-9_.-]*$")
+
+
+class UniversalCaseIn(BaseModel):
+    input: str = Field(..., min_length=1, max_length=MAX_TEXT_CHARS)
+    expected_behaviour: str = Field(..., min_length=1, max_length=MAX_TEXT_CHARS)
+
+
+class UniversalCasesIn(BaseModel):
+    cases: List[UniversalCaseIn] = Field(..., min_length=1, max_length=MAX_UNIVERSAL_CASES)
+
+
+def _config_for_call(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {**row, "headers": json.loads(row.get("headers_json") or "{}")}
+
+
+def _public_config(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Header values are credentials: only their names leave the server."""
+    out = {k: row[k] for k in ("config_id", "name", "url", "method", "body_template", "response_path")}
+    out["header_names"] = sorted(json.loads(row.get("headers_json") or "{}"))
+    return out
+
+
+def _universal_config_or_404(config_id: str) -> Dict[str, Any]:
+    row = db.get_universal_config(config_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"API configuration '{config_id}' not found.")
+    return row
+
+
+@app.get("/api/universal/configs")
+def list_universal_configs():
+    return [_public_config(r) for r in db.list_universal_configs()]
+
+
+@app.post("/api/universal/configs", dependencies=[Depends(require_write_access)])
+def create_universal_config(cfg: UniversalConfigIn):
+    row = {**cfg.model_dump(exclude={"headers"}), "headers_json": json.dumps(cfg.headers)}
+    try:
+        universal.validate_config({**row, "headers": cfg.headers})
+    except ValueError as e:  # includes UnsafeTarget
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        db.create_universal_config(row)
+    except db.GoldenPairExists:
+        raise HTTPException(status_code=409, detail=f"Configuration '{cfg.config_id}' already exists. Choose another ID.")
+    return _public_config(row)
+
+
+@app.post("/api/universal/configs/{config_id}/cases", dependencies=[Depends(require_write_access)])
+def add_universal_cases(config_id: str, body: UniversalCasesIn):
+    _universal_config_or_404(config_id)
+    target = f"{UNIVERSAL_PREFIX}{config_id}"
+    existing = [p for p in db.get_golden_pairs() if p["target_app"] == target]
+    created = []
+    for n, case in enumerate(body.cases, start=len(existing) + 1):
+        pair_id = f"U-{config_id}-{n:02d}"
+        try:
+            db.create_golden_pair(pair_id, target, case.input, case.expected_behaviour)
+            created.append(pair_id)
+        except db.GoldenPairExists:
+            continue
+    return {"created": created}
+
+
+@app.post("/api/universal/configs/{config_id}/run", dependencies=[Depends(require_write_access)])
+def run_universal_cases(config_id: str, timeout: float = Query(default=15.0, ge=1, le=30)):
+    _universal_config_or_404(config_id)
+    pairs = [p for p in db.get_golden_pairs() if p["target_app"] == f"{UNIVERSAL_PREFIX}{config_id}"][:MAX_UNIVERSAL_RUN]
+    if not pairs:
+        raise HTTPException(status_code=400, detail="Add golden pairs to this configuration before running it.")
+    run_id = f"universal_{config_id}_{time.strftime('%Y%m%d_%H%M%S')}"
+
+    def one(pair):
+        detail, latency = _run_and_save(pair, run_id, timeout)
+        return {"pair_id": pair["pair_id"], "result_id": detail["result_id"], "verdict": detail["verdict"],
+                "latency_ms": latency}
+
+    with ThreadPoolExecutor(max_workers=UNIVERSAL_CONCURRENCY) as pool:
+        results = list(pool.map(one, pairs))
+    return {"run_id": run_id, "results": results}
 
 
 @app.get("/api/runs")
