@@ -102,12 +102,14 @@ node --test web/lib.test.mjs
 
 Hosted deployments are deliberately strict:
 - **Durable storage is required to save anything.** Vercel's filesystem is temporary and per-instance, so without Supabase the app is read-only and says so, rather than accepting runs it would lose.
-- **Writes need `MANTIS_ADMIN_TOKEN`.** Running tests and adding cases send `Authorization: Bearer <token>`; the UI asks for it once per tab. Without the variable, hosted writes are refused.
+- **Adding cases needs `MANTIS_ADMIN_TOKEN`.** The UI asks for it once per tab and sends `Authorization: Bearer <token>`. Without the variable, hosted writes are refused.
+- **Running existing cases needs no token.** Runs without a valid token are limited to `MANTIS_OPEN_RUNS_PER_MINUTE` (default 5) per target per minute, counted from stored runs; over the limit the API answers 429. Runs with the token aren't limited.
 - **The interactive API docs are off**, and every page is served with a strict Content Security Policy.
 
 | Variable | Needed for | Environments |
 |---|---|---|
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | Durable storage (required to save runs) | Production, Preview |
-| `MANTIS_ADMIN_TOKEN` | Running tests and adding cases | Production, Preview |
-| `GROQ_API_KEY` | Optional LLM judge | Production, Preview |
+| `MANTIS_ADMIN_TOKEN` | Adding cases; runs without the per-minute limit | Production, Preview |
+| `GROQ_API_KEY` | LLM judge for checks the deterministic rules can't decide (without it they stay Needs review) | Production, Preview |
+| `MANTIS_OPEN_RUNS_PER_MINUTE` | Optional: runs per target per minute without a token (default 5) | Only to change it |
 | `OPENROUTER_API_KEY` + `MANTIS_SEMANTIC_SAFETY=1` | Optional semantic content safety | Only if wanted |

@@ -12,6 +12,7 @@ import hmac
 import os
 import time
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Literal
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -58,9 +59,12 @@ async def security_headers(request: Request, call_next):
 # Write access
 # ----------------------------------------------------
 
-# Runs against these targets need no token (owner's decision): anyone with the URL can run their cases.
-# Creating cases, and running every other target, still requires write access.
-OPEN_EXECUTE_TARGETS = ["Prateek"]
+# Runs against these targets need no token (owner's decision): anyone with the URL can run the existing cases.
+# Creating cases still requires the admin token. Runs without a valid token are limited per target, counted from
+# stored runs so the limit holds across serverless instances, which protects the targets and the database.
+OPEN_EXECUTE_TARGETS = ["Anupma", "Prateek"]
+DEFAULT_OPEN_RUNS_PER_MINUTE = 5
+OPEN_RUN_WINDOW_S = 60
 
 
 def require_write_access(authorization: Optional[str] = Header(default=None)):
@@ -84,6 +88,24 @@ def _require_token(authorization: Optional[str]):
     elif db.is_hosted():
         raise HTTPException(status_code=403,
                             detail="Writes are disabled on this deployment until MANTIS_ADMIN_TOKEN is configured.")
+
+
+def _has_write_access(authorization: Optional[str]) -> bool:
+    try:
+        _require_token(authorization)
+        return True
+    except HTTPException:
+        return False
+
+
+def _limit_open_runs(target_app: str):
+    """At most MANTIS_OPEN_RUNS_PER_MINUTE runs per target in the last minute for callers without a valid token."""
+    limit = int(os.getenv("MANTIS_OPEN_RUNS_PER_MINUTE", DEFAULT_OPEN_RUNS_PER_MINUTE))
+    since = datetime.fromtimestamp(time.time() - OPEN_RUN_WINDOW_S, tz=timezone.utc).isoformat()
+    if db.count_recent_runs(target_app, since) >= limit:
+        raise HTTPException(status_code=429, headers={"Retry-After": str(OPEN_RUN_WINDOW_S)},
+                            detail=f"{target_app}'s cases ran {limit} times in the last minute, the limit without an "
+                                   f"access token. Try again in a minute.")
 
 
 def _require_durable_storage():
@@ -212,10 +234,12 @@ def execute_test(req: ExecuteRequest, authorization: Optional[str] = Header(defa
     pair = db.get_golden_pair(req.pair_id)
     if not pair:
         raise HTTPException(status_code=404, detail=f"Golden pair '{req.pair_id}' not found.")
-    # Write access, checked before any target call; open targets skip only the token
+    # Write access, checked before any target call: open targets skip the token but not the run limit
+    _require_durable_storage()
     if pair["target_app"] not in OPEN_EXECUTE_TARGETS:
         _require_token(authorization)
-    _require_durable_storage()
+    elif not _has_write_access(authorization):
+        _limit_open_runs(pair["target_app"])
 
     # Generate default run_id if not provided
     run_id = req.run_id or f"run_{time.strftime('%Y%m%d_%H%M%S')}"

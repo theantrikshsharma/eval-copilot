@@ -102,17 +102,48 @@ class WriteAccess(TempDatabaseCase):
         self.assertEqual(self.post({"Authorization": "Bearer wrong"}).status_code, 401)
         self.assertEqual(self.post({"Authorization": "Bearer correct-horse"}).status_code, 200)
 
-    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
-    def test_anupma_runs_still_need_the_token_and_make_no_target_call(self):
-        with patch("api.invoke_target") as invoke:
-            resp = self.client.post("/api/execute", json={"pair_id": "A-01"})
-        self.assertEqual(resp.status_code, 401)
-        invoke.assert_not_called()
-
-    def execute_prateek(self, headers=None):
+    def execute(self, pair_id, headers=None):
         resp = AdapterResponse(success=True, status_code=200, latency_ms=10.0, raw_response="No reliable answer found.")
         with patch("api.invoke_target", return_value=resp) as invoke:
-            return self.client.post("/api/execute", json={"pair_id": "P-01"}, headers=headers or {}), invoke
+            return self.client.post("/api/execute", json={"pair_id": pair_id}, headers=headers or {}), invoke
+
+    def execute_prateek(self, headers=None):
+        return self.execute("P-01", headers)
+
+    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
+    def test_anupma_runs_need_no_token(self):
+        resp, invoke = self.execute("A-01")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        invoke.assert_called_once()
+        self.assertEqual(db.get_run_result_detail(resp.json()["result_id"])["pair_id"], "A-01")
+
+    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse", "MANTIS_OPEN_RUNS_PER_MINUTE": "2"})
+    def test_runs_without_a_token_are_limited_per_target(self):
+        self.assertEqual([self.execute("A-01")[0].status_code for _ in range(2)], [200, 200])
+        resp, invoke = self.execute("A-02")
+        self.assertEqual(resp.status_code, 429)
+        self.assertEqual(resp.headers["Retry-After"], "60")
+        self.assertIn("Anupma", resp.json()["detail"])
+        invoke.assert_not_called()
+        self.assertEqual(self.execute("P-01")[0].status_code, 200, "another target has its own limit")
+
+    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse", "MANTIS_OPEN_RUNS_PER_MINUTE": "1"})
+    def test_token_holders_are_not_limited(self):
+        self.assertEqual(self.execute("A-01")[0].status_code, 200)
+        self.assertEqual(self.execute("A-01")[0].status_code, 429)
+        self.assertEqual(self.execute("A-01", {"Authorization": "Bearer correct-horse"})[0].status_code, 200)
+
+    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse", "MANTIS_OPEN_RUNS_PER_MINUTE": "1"})
+    def test_only_runs_in_the_last_minute_count(self):
+        db.save_run_result("old", "A-01", "x", "PASS", [])
+        with patch("api.time.time", return_value=__import__("time").time() + 61):
+            self.assertEqual(self.execute("A-01")[0].status_code, 200)
+
+    @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
+    def test_a_wrong_token_on_an_open_run_is_treated_as_no_token(self):
+        resp, invoke = self.execute("A-01", {"Authorization": "Bearer wrong"})
+        self.assertEqual(resp.status_code, 200)
+        invoke.assert_called_once()
 
     @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
     def test_prateek_runs_need_no_token(self):
@@ -146,7 +177,7 @@ class WriteAccess(TempDatabaseCase):
         invoke.assert_not_called()
 
     def test_health_lists_targets_that_run_without_a_token(self):
-        self.assertEqual(self.client.get("/api/health").json()["open_execute_targets"], ["Prateek"])
+        self.assertEqual(self.client.get("/api/health").json()["open_execute_targets"], ["Anupma", "Prateek"])
 
     @patch.dict(os.environ, {"MANTIS_ADMIN_TOKEN": "correct-horse"})
     def test_reads_stay_public(self):

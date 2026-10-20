@@ -77,5 +77,28 @@ class TestWritesNeverRetry(unittest.TestCase):
         self.assertEqual(insert.execute.call_count, 1)
 
 
+class TestRecentRunCountOnSupabase(unittest.TestCase):
+    """The open-run limit reads the same counts from Supabase as from SQLite."""
+
+    def test_counts_runs_of_the_targets_pairs_since_the_cutoff(self):
+        client = MagicMock()
+        pairs_query = client.table.return_value.select.return_value.eq.return_value
+        pairs_query.execute.return_value = MagicMock(data=[{"pair_id": "A-01"}, {"pair_id": "A-02"}])
+        runs_query = client.table.return_value.select.return_value.in_.return_value.gte.return_value
+        runs_query.execute.return_value = MagicMock(data=[{"result_id": 7}, {"result_id": 8}])
+        with patch.object(db, "_using_supabase", True), patch.object(db, "_supabase_client", client):
+            self.assertEqual(db.count_recent_runs("Anupma", "2026-10-20T10:00:00+00:00"), 2)
+        client.table.return_value.select.return_value.eq.assert_called_with("target_app", "Anupma")
+        client.table.return_value.select.return_value.in_.assert_called_with("pair_id", ["A-01", "A-02"])
+        client.table.return_value.select.return_value.in_.return_value.gte.assert_called_with(
+            "timestamp", "2026-10-20T10:00:00+00:00")
+
+    def test_a_target_without_cases_has_no_runs(self):
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+        with patch.object(db, "_using_supabase", True), patch.object(db, "_supabase_client", client):
+            self.assertEqual(db.count_recent_runs("Anupma", "2026-10-20T10:00:00+00:00"), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

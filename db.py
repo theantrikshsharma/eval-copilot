@@ -419,6 +419,25 @@ def save_run_result(
             return int(result_id)
 
 
+def count_recent_runs(target_app: str, since_iso: str) -> int:
+    """Runs of the target's cases stored at or after since_iso (a UTC ISO timestamp, as save_run_result writes)."""
+    if _using_supabase:
+        pairs = _execute_read(_supabase_client.table("golden_pairs").select("pair_id").eq("target_app", target_app)).data
+        pair_ids = [p["pair_id"] for p in pairs or []]
+        if not pair_ids:
+            return 0
+        runs = _execute_read(_supabase_client.table("run_results").select("result_id")
+                             .in_("pair_id", pair_ids).gte("timestamp", since_iso)).data
+        return len(runs or [])
+    with _get_sqlite_conn() as conn:
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM run_results r JOIN golden_pairs g ON g.pair_id = r.pair_id "
+            "WHERE g.target_app = ? AND r.timestamp >= ?",
+            (target_app, since_iso),
+        )
+        return int(cur.fetchone()[0])
+
+
 def get_run_results(pair_id: Optional[str] = None, run_id: Optional[str] = None) -> List[Dict[str, Any]]:
     if _using_supabase:
         def build():
