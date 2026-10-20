@@ -1,5 +1,5 @@
 {
-  "git": { "deploymentEnabled": false },
+  "git": { "deploymentEnabled": { "main": false } },
   "builds": [
     {
       "src": "main.py",
