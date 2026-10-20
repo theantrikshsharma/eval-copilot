@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
+import httpx
 from dotenv import load_dotenv
 
 # Load environment variables. Tests (MANTIS_TEST_MODE, set by tests/__init__.py) never read the developer's .env.
@@ -140,12 +141,24 @@ def _get_sqlite_conn():
 # Supabase helpers
 # ----------------------------------------------------
 
+# Supabase closes idle HTTP/2 connections, and a warm serverless instance can reuse one ("Server disconnected").
+# Reads are idempotent, so they retry once on a fresh connection. Writes never retry: a run must not be stored twice.
+_DROPPED_CONNECTION = (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError)
+
+
+def _execute_read(query):
+    try:
+        return query.execute()
+    except _DROPPED_CONNECTION:
+        return query.execute()
+
+
 def _fetch_all(build_query) -> List[Dict[str, Any]]:
     """Reads every row by paging past Supabase's per-request row cap. build_query returns a fresh query."""
     rows: List[Dict[str, Any]] = []
     start = 0
     while True:
-        page = build_query().range(start, start + SUPABASE_PAGE_SIZE - 1).execute().data or []
+        page = _execute_read(build_query().range(start, start + SUPABASE_PAGE_SIZE - 1)).data or []
         rows.extend(page)
         if len(page) < SUPABASE_PAGE_SIZE:
             return rows
@@ -166,7 +179,7 @@ def init_db():
         # Supabase tables are created via schema.sql in Supabase SQL editor.
         # Seed golden pairs if empty
         try:
-            res = _supabase_client.table("golden_pairs").select("pair_id").limit(1).execute()
+            res = _execute_read(_supabase_client.table("golden_pairs").select("pair_id").limit(1))
             if not res.data:
                 _seed_initial_pairs_supabase()
         except Exception as e:
@@ -259,7 +272,7 @@ def get_golden_pairs(target_app: Optional[str] = None) -> List[Dict[str, Any]]:
         q = _supabase_client.table("golden_pairs").select("*")
         if target_app and target_app.lower() != "all":
             q = q.ilike("target_app", f"%{target_app}%")
-        res = q.order("pair_id").execute()
+        res = _execute_read(q.order("pair_id"))
         return res.data or []
     else:
         with _get_sqlite_conn() as conn:
@@ -275,7 +288,7 @@ def get_golden_pairs(target_app: Optional[str] = None) -> List[Dict[str, Any]]:
 
 def get_golden_pair(pair_id: str) -> Optional[Dict[str, Any]]:
     if _using_supabase:
-        res = _supabase_client.table("golden_pairs").select("*").eq("pair_id", pair_id).execute()
+        res = _execute_read(_supabase_client.table("golden_pairs").select("*").eq("pair_id", pair_id))
         return res.data[0] if res.data else None
     else:
         with _get_sqlite_conn() as conn:
@@ -438,12 +451,12 @@ def get_run_results(pair_id: Optional[str] = None, run_id: Optional[str] = None)
 
 def get_run_result_detail(result_id: int) -> Optional[Dict[str, Any]]:
     if _using_supabase:
-        res = _supabase_client.table("run_results").select("*, golden_pairs(target_app, input, expected_behaviour)") \
-            .eq("result_id", result_id).execute()
+        res = _execute_read(_supabase_client.table("run_results").select("*, golden_pairs(target_app, input, expected_behaviour)")
+                            .eq("result_id", result_id))
         if not res.data:
             return None
         run_data = _flatten_run(res.data[0])
-        checks_res = _supabase_client.table("check_results").select("*").eq("result_id", result_id).order("check_result_id").execute()
+        checks_res = _execute_read(_supabase_client.table("check_results").select("*").eq("result_id", result_id).order("check_result_id"))
         run_data["checks"] = checks_res.data or []
         return run_data
     else:
