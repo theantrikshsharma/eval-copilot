@@ -42,6 +42,24 @@ def evaluate_response(
     checks: List[SingleCheckResult] = []
 
     # 1. Technical Health Check (First Gate)
+    if resp.contract_error:
+        # Reachable (HTTP 200) but the body is unusable: a technical failure, reported apart from availability
+        checks.append(SingleCheckResult(
+            check_name="HTTP & Network Reachability",
+            status="PASS",
+            evidence_or_reason=f"HTTP {resp.status_code} received in {resp.latency_ms}ms"
+        ))
+        checks.append(SingleCheckResult(
+            check_name="API Contract Compliance",
+            status="ERROR",
+            evidence_or_reason=f"Response contract violation: {resp.contract_error}"
+        ))
+        return EvaluationResult(
+            overall_status="ERROR",
+            why_failed=f"[API Contract Compliance] {resp.contract_error}",
+            checks=checks
+        )
+
     if not resp.success:
         err_msg = resp.error or "Target application did not return a successful response."
         checks.append(SingleCheckResult(
@@ -679,13 +697,14 @@ def _eval_A15(parsed, raw_text, checks):
 
 def _eval_P01(raw_text: str, checks: List[SingleCheckResult]):
     """
-    P-01: Project Cedar meeting room supply airflow (300 m3/h) and occupancy (10).
+    P-01: Project Cedar meeting room supply airflow (300 m3/h) and occupancy (10), from Section 2.2 of its report.
     """
     text_lower = raw_text.lower()
     # Exact numbers: "10" must not match "100" or "2010", nor "300" match "3000"
     has_300 = _has_number(raw_text, "300")
     has_10 = _has_number(raw_text, "10")
-    has_cedar = bool(re.search(r"\bcedar\b", text_lower))
+    # The answer names the project anyway; a citation must point at the source section
+    has_cedar = bool(re.search(r"\bcedar\b", text_lower)) and _has_number(raw_text, "2.2")
 
     checks.append(SingleCheckResult(
         check_name="Supply Airflow Fact (300 m³/h)",
@@ -702,65 +721,64 @@ def _eval_P01(raw_text: str, checks: List[SingleCheckResult]):
     checks.append(SingleCheckResult(
         check_name="Source Citation",
         status="PASS" if has_cedar else "FAIL",
-        evidence_or_reason="Cited Project Cedar meeting room report." if has_cedar else "Failed to cite Project Cedar source document."
+        evidence_or_reason="Cited the Project Cedar meeting room report, Section 2.2." if has_cedar
+        else f"Does not cite Section 2.2 of the Project Cedar meeting room report: '{_excerpt(raw_text)}'"
     ))
 
 
 def _eval_P02(raw_text: str, checks: List[SingleCheckResult]):
     """
-    P-02: Compare Project Maple energy targets (BENG 1 <= 60, BENG 2 <= 35, BENG 3 >= 45%) with Project Cedar ventilation (300 m3/h, 10 occupants).
+    P-02: Compare Project Maple energy targets (BENG 1 <= 60, BENG 2 <= 35, BENG 3 >= 45%) with Project Cedar
+    ventilation (300 m3/h, 10 occupants), citing both documents (Maple Section 1.1, Cedar Section 2.2).
     """
-    text_lower = raw_text.lower()
-    has_maple = "maple" in text_lower and ("60" in text_lower or "beng" in text_lower)
-    has_cedar = "cedar" in text_lower and ("300" in text_lower or "ventilation" in text_lower)
-    has_distinction = ("cedar" in text_lower and "maple" in text_lower)
+    body = _answer_body(raw_text)
 
-    checks.append(SingleCheckResult(
-        check_name="Project Maple Energy Targets Retrieval",
-        status="PASS" if has_maple else "FAIL",
-        evidence_or_reason="Found Project Maple BENG energy performance facts." if has_maple else "Failed to retrieve Project Maple energy targets."
-    ))
+    def project_facts(name: str, project: str, figures: tuple, described: str):
+        missing = [n for n in figures if not _has_number(body, n)]
+        named = bool(re.search(rf"\b{project}\b", body, re.I))
+        found = named and not missing
+        problem = f"missing {', '.join(missing)}" if missing else f"does not name Project {project.title()}"
+        _check_fact(checks, name, found, f"States Project {project.title()}'s {described}.",
+                    f"Incomplete Project {project.title()} facts ({problem}; expected {described}): '{_excerpt(body)}'")
 
-    checks.append(SingleCheckResult(
-        check_name="Project Cedar Ventilation Facts Retrieval",
-        status="PASS" if has_cedar else "FAIL",
-        evidence_or_reason="Found Project Cedar ventilation assumptions." if has_cedar else "Failed to retrieve Project Cedar assumptions."
-    ))
+    project_facts("Project Maple Energy Targets Retrieval", "maple", ("60", "35", "45"),
+                  "BENG 1 <= 60, BENG 2 <= 35 kWh/m2 per year and BENG 3 >= 45%")
+    project_facts("Project Cedar Ventilation Facts Retrieval", "cedar", ("300", "10"),
+                  "300 m3/h supply airflow for 10 occupants")
+    cites_both = _has_number(raw_text, "1.1") and _has_number(raw_text, "2.2")
+    _check_fact(checks, "Both Sources Cited (Sections 1.1 and 2.2)", cites_both,
+                "Cites both distinct sources: Project Maple Section 1.1 and Project Cedar Section 2.2.",
+                f"Does not cite both distinct sources (Project Maple Section 1.1 and Project Cedar Section 2.2): '{_excerpt(raw_text)}'")
 
-    checks.append(SingleCheckResult(
-        check_name="Cross-Project Boundary Distinction",
-        status="PASS" if has_distinction else "FAIL",
-        evidence_or_reason="Distinguished both projects as separate scopes." if has_distinction else "Failed to properly distinguish both project scopes."
-    ))
+
+_TWELVE_PERCENT = re.compile(r"(?<![\d.])12(?:\.0+)?\s*(%|percent|per cent)", re.I)
+
+
+def _check_daylight_ratio(checks: List[SingleCheckResult], body: str):
+    _check_fact(checks, "Daylight Ratio (12%)", bool(_TWELVE_PERCENT.search(body)),
+                "States the minimum of 12 percent of the living-room floor area.",
+                f"Does not state the 12 percent equivalent daylight area ratio: '{_excerpt(body)}'")
 
 
 def _eval_P03(raw_text: str, checks: List[SingleCheckResult]):
     """
-    P-03: Retrieval beyond straightforward keyword matching (Natural light in living rooms -> Project Birch, 12%).
+    P-03: semantic retrieval capability probe. The question avoids every keyword of the Birch document ('natural
+    light', not 'daylight'), and the live retriever only matches exact keywords. A FAIL records a missing capability,
+    not missing data: the Birch document (Section 2.1) holds the answer, and P-03K asks the same with the keyword.
     """
-    text_lower = raw_text.lower()
-    no_answer_found = "no reliable answer found" in text_lower
-    has_birch = "birch" in text_lower
-    has_12 = "12" in text_lower or "12%" in text_lower
-
-    if no_answer_found:
-        checks.append(SingleCheckResult(
-            check_name="Semantic Retrieval Beyond Exact Keywords",
-            status="FAIL",
-            evidence_or_reason="Retriever returned 'No reliable answer found'. It failed to map 'natural light' to 'daylight/daglicht' for Project Birch."
-        ))
-    elif has_birch and has_12:
-        checks.append(SingleCheckResult(
-            check_name="Semantic Retrieval Beyond Exact Keywords",
-            status="PASS",
-            evidence_or_reason="Successfully mapped query to Project Birch and extracted the 12% daylight rule."
-        ))
-    else:
-        checks.append(SingleCheckResult(
-            check_name="Semantic Retrieval Beyond Exact Keywords",
-            status="NEEDS REVIEW",
-            evidence_or_reason=f"Partial or unexpected answer returned: {raw_text[:200]}..."
-        ))
+    name = "Semantic Retrieval Beyond Exact Keywords"  # unchanged so run history stays comparable
+    body = _answer_body(raw_text)
+    if _abstains(raw_text):
+        _add(checks, name, "FAIL",
+             "Capability probe: no answer for a paraphrase ('natural light' for 'daylight'), though the Project Birch "
+             "document (Section 2.1) holds it. The retriever matches exact keywords only; P-03K checks the "
+             f"keyword-aligned question: '{_excerpt(body)}'")
+        return
+    if not re.search(r"\bbirch\b", raw_text, re.I):
+        _add(checks, name, "FAIL", f"Capability probe: answered without identifying Project Birch: '{_excerpt(body)}'")
+        return
+    _add(checks, name, "PASS", "Capability probe: mapped 'natural light' to the Project Birch daylight rule.")
+    _check_daylight_ratio(checks, body)
 
 
 def _eval_P04(resp: AdapterResponse, raw_text: str, checks: List[SingleCheckResult]):
@@ -775,11 +793,13 @@ def _eval_P04(resp: AdapterResponse, raw_text: str, checks: List[SingleCheckResu
     text_lower = raw_text.lower()
     # Needs both the project and its figure; a bare mention of "sun" used to pass
     has_elm = bool(re.search(r"\belm\b", text_lower)) and _has_number(raw_text, "2.5")
+    # The Elm document states the figure outright, so a missing figure is a FAIL, not a judgment call
     checks.append(SingleCheckResult(
         check_name="Valid Retrieval Content",
-        status="PASS" if has_elm else "NEEDS REVIEW",
+        status="PASS" if has_elm else "FAIL",
         evidence_or_reason="Response names Project Elm and its 2.5-hour sun requirement." if has_elm
-        else "Response did not clearly name Project Elm together with its 2.5-hour requirement."
+        else f"Does not name Project Elm together with its documented 2.5-hour requirement (Section 3.1): "
+             f"'{_excerpt(_answer_body(raw_text))}'"
     ))
     cites_section = _has_number(raw_text, "3.1")
     checks.append(SingleCheckResult(
@@ -800,7 +820,9 @@ def _eval_P04(resp: AdapterResponse, raw_text: str, checks: List[SingleCheckResu
 _NO_ANSWER = re.compile(
     r"no reliable answer|not (available|mentioned|specified|provided|included|covered|stated)|"
     r"no (information|data|details|mention)|does ?n[o']t (contain|include|mention|specify|provide)|"
-    r"cannot (find|answer)|could ?n[o']t find|insufficient information|unable to (find|answer)",
+    r"cannot (find|answer)|could ?n[o']t find|insufficient information|unable to (find|answer)|"
+    # Plural "do not" only with the documents as subject: "Calculations do not include cloud cover" is a real answer
+    r"\b(documents?|sources?|excerpts?|collection|context) do ?n[o']t (contain|include|mention|specify|provide)",
     re.I,
 )
 
@@ -974,6 +996,26 @@ def _eval_P13(parsed, raw_text, checks):
         _add(checks, name, "NEEDS REVIEW", f"Neither declines nor gives a figure: '{_excerpt(body)}'")
 
 
+def _eval_P03K(parsed, raw_text, checks):
+    """P-03K: P-03 asked with 'daylight', a Birch keyword: retrieval the target supports, unlike the P-03 probe."""
+    if not _check_retrieved(checks, raw_text, "Project Birch Identified", r"\bbirch\b",
+                            "a keyword-aligned question about Project Birch's daylight rule"):
+        return
+    body = _answer_body(raw_text)
+    _check_daylight_ratio(checks, body)
+    _check_fact(checks, "Equivalent Daylight Area Stated", bool(re.search(r"equivalent daylight area", body, re.I)),
+                "Describes the requirement as equivalent daylight area.",
+                f"Does not describe the requirement as equivalent daylight area, which the document distinguishes "
+                f"from glazing area: '{_excerpt(body)}'")
+    _check_fact(checks, "Section 2.1 Cited", _has_number(raw_text, "2.1"),
+                "Cites Section 2.1.", f"Does not cite Section 2.1 of the Project Birch rules: '{_excerpt(raw_text)}'")
+
+
+def _eval_PF01(parsed, raw_text, checks):
+    """PF-01: out-of-domain question; no document covers it, so the only correct answer is to decline."""
+    _check_absent_fact(checks, raw_text, r"\bparis\b", "an answer from outside the document collection")
+
+
 # ----------------------------------------------------
 # Registry: each per-case check set is tied to its exact pre-registered input
 # ----------------------------------------------------
@@ -999,6 +1041,8 @@ CASE_INPUTS: Dict[str, str] = {
     "P-11": "What is the difference between cumulative noise and combined noise?",
     "P-12": "Which document and section describe the sun hours requirement for Project Elm?",
     "P-13": "What are the actual Dutch BENG 1 limits for new homes?",
+    "P-03K": "Which project has rules regarding how much daylight must enter residential living rooms, and what is the required ratio?",
+    "PF-01": "What is the capital of France?",
 }
 
 _CASE_CHECKS = {
@@ -1007,7 +1051,32 @@ _CASE_CHECKS = {
     "A-15": _eval_A15,
     "P-05": _eval_P05, "P-06": _eval_P06, "P-07": _eval_P07, "P-08": _eval_P08, "P-09": _eval_P09,
     "P-10": _eval_P10, "P-11": _eval_P11, "P-12": _eval_P12, "P-13": _eval_P13,
+    "P-03K": _eval_P03K, "PF-01": _eval_PF01,
 }
+
+# What each Target B case measures, so a capability probe's FAIL can be read apart from a retrieval bug.
+# Metadata only: it never changes a check or a verdict, and isn't stored or returned by the API.
+TEST_CATEGORIES = {
+    "retrieval_correctness": "Retrieves and states information the documents contain",
+    "semantic_capability_probe": "Retrieval without the documents' keywords; the target's retriever is keyword-gated",
+    "unsupported_question": "Declines or corrects questions the documents don't answer, or that rest on a false premise",
+    "citation_correctness": "Cites the right document and section",
+}
+_CASE_CATEGORY = {
+    "P-01": "retrieval_correctness", "P-02": "retrieval_correctness", "P-03": "semantic_capability_probe",
+    "P-04": "retrieval_correctness", "P-05": "semantic_capability_probe", "P-06": "retrieval_correctness",
+    "P-07": "unsupported_question", "P-08": "unsupported_question", "P-09": "unsupported_question",
+    "P-10": "retrieval_correctness", "P-11": "retrieval_correctness", "P-12": "citation_correctness",
+    "P-13": "unsupported_question", "P-03K": "retrieval_correctness", "PF-01": "unsupported_question",
+}
+
+
+def case_category(pair_id: str, test_input: str) -> Optional[str]:
+    """The case's category, or None when its per-case checks don't apply (same input rule as the routing above)."""
+    category = _CASE_CATEGORY.get(pair_id)
+    if category and pair_id in CASE_INPUTS and CASE_INPUTS[pair_id] != test_input.strip():
+        return None
+    return category
 
 
 def _eval_generic(

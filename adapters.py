@@ -19,6 +19,8 @@ class AdapterResponse(BaseModel):
     raw_response: str = ""
     parsed_data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    # Set when the target answered HTTP 200 but the body breaks its response contract (unusable, so not success)
+    contract_error: Optional[str] = None
 
 
 class AnupmaAdapter:
@@ -136,13 +138,32 @@ class PrateekAdapter:
                     error=f"HTTP {resp.status_code}: {resp.text[:300]}"
                 )
 
-            data = resp.json()
-            answer_text = data.get("answer", "")
+            # Observed contract (the OpenAPI 200 schema is empty): a JSON object with a non-empty string "answer"
+            try:
+                data = resp.json()
+            except ValueError:
+                data = None
+            answer_text = data.get("answer") if isinstance(data, dict) else None
+            if not isinstance(answer_text, str) or not answer_text.strip():
+                problem = ("body is not JSON" if data is None else
+                           "body is not a JSON object" if not isinstance(data, dict) else
+                           "'answer' field is missing" if "answer" not in data else
+                           "'answer' is not a string" if not isinstance(answer_text, str) else
+                           "'answer' is empty")
+                return AdapterResponse(
+                    success=False,
+                    status_code=resp.status_code,
+                    latency_ms=latency_ms,
+                    raw_response=resp.text,
+                    parsed_data=data if isinstance(data, dict) else None,
+                    error=f"Response contract violation: {problem}",
+                    contract_error=f"Expected a JSON object with a non-empty string 'answer'; {problem}."
+                )
             return AdapterResponse(
                 success=True,
                 status_code=resp.status_code,
                 latency_ms=latency_ms,
-                raw_response=answer_text if answer_text else json.dumps(data),
+                raw_response=answer_text,
                 parsed_data=data,
                 error=None
             )

@@ -25,7 +25,8 @@ MANTIS (Machine-Assisted Network Testing & Intelligent Scrutiny, formerly Eval C
 uv venv && source .venv/bin/activate && uv pip install -r requirements.txt   # add -r requirements-classic.txt for /classic
 uvicorn main:app --reload --port 8000
 python -m unittest tests/test_mvp.py
-python -m unittest tests/test_audit_fixes.py tests/test_safety_and_verdicts.py tests/test_case_checks.py tests/test_judges.py tests/test_web.py   # offline
+python -m unittest tests/test_audit_fixes.py tests/test_safety_and_verdicts.py tests/test_case_checks.py tests/test_prateek_checks.py tests/test_judges.py tests/test_web.py   # offline
+MANTIS_LIVE=1 python -m unittest tests/test_prateek_contract_live.py   # opt-in: 2 sequential requests to Prateek's validation
 node --test web/lib.test.mjs                                 # front-end logic
 ```
 
