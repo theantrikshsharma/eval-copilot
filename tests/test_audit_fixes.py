@@ -314,10 +314,13 @@ class SecurityAndDeployment(unittest.TestCase):
         self.assertFalse(httpx_logger.isEnabledFor(logging.INFO), "request URLs would still be logged")
         self.assertTrue(httpx_logger.isEnabledFor(logging.WARNING), "real httpx warnings must still be logged")
 
-    def test_vercel_config_routes_to_main_and_disables_git_deployments(self):
+    def test_vercel_config_routes_to_main_and_never_deploys_main_from_git(self):
         import json
         config = json.loads((PROJECT_ROOT / "vercel.json").read_text())
-        self.assertEqual(config["git"], {"deploymentEnabled": False}, "pushes must never deploy automatically")
+        # Other branches deploy as Previews; main is the Production branch and must never deploy from a push.
+        # Exactly this rule: any extra rule set to true that matched main (e.g. "*") would deploy it.
+        self.assertEqual(config["git"], {"deploymentEnabled": {"main": False}},
+                         "main (the Production branch) must never deploy automatically")
         self.assertEqual(config["builds"][0]["src"], "main.py")
         self.assertEqual(config["routes"], [{"src": "/(.*)", "dest": "main.py"}])
         ignored = (PROJECT_ROOT / ".vercelignore").read_text().split()
