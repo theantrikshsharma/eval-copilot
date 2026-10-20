@@ -114,6 +114,8 @@ def evaluate_response(
     # Model-backed checks run after the deterministic ones, and only when enabled
     if judges.is_judge_enabled():
         _escalate_to_judge(test_input, expected_behaviour, raw_text, checks)
+    else:
+        _note_judge_not_run(checks)
     if judges.is_safety_enabled() and raw_text.strip():
         safety = judges.classify_safety(test_input, raw_text)
         checks.append(SingleCheckResult(
@@ -218,7 +220,8 @@ def _escalate_to_judge(
 ):
     """
     Sends each NEEDS REVIEW check to the LLM judge. Deterministic PASS and FAIL results are never touched.
-    The check keeps its name, and its evidence records both the deterministic reason and the judge's verdict.
+    The check keeps its name. Its evidence leads with the judge's outcome (verdict, UNSURE or provider error),
+    so the UI's preview shows it, followed by the deterministic reason.
     """
     for i, check in enumerate(checks):
         if check.status != "NEEDS REVIEW":
@@ -227,8 +230,20 @@ def _escalate_to_judge(
         checks[i] = SingleCheckResult(
             check_name=check.check_name,
             status=verdict.status,
-            evidence_or_reason=f"Deterministic: {check.evidence_or_reason} | {verdict.evidence}"
+            evidence_or_reason=f"{verdict.evidence} | Deterministic: {check.evidence_or_reason}"
         )
+
+
+def _note_judge_not_run(checks: List[SingleCheckResult]):
+    """Without a judge key, NEEDS REVIEW checks stay NEEDS REVIEW and say why the judge didn't decide them."""
+    for i, check in enumerate(checks):
+        if check.status == "NEEDS REVIEW":
+            checks[i] = SingleCheckResult(
+                check_name=check.check_name,
+                status=check.status,
+                evidence_or_reason=f"Judge not run: GROQ_API_KEY is not configured on this server. "
+                                   f"| Deterministic: {check.evidence_or_reason}"
+            )
 
 
 # ----------------------------------------------------
